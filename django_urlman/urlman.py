@@ -3,8 +3,13 @@ from django.urls import path
 import sys
 import importlib
 import inspect
-import datetime
+import traceback
+
 from django.http.response import HttpResponseBase, JsonResponse
+from django.core.serializers.json import DjangoJSONEncoder
+
+# make sure extra converters are registered.
+from . import converters
 
 _urls = []
 
@@ -60,6 +65,20 @@ def url(f):
     _urls.append(f)
     return f
 
+class _MyJSONEncoder(DjangoJSONEncoder):
+    enable_all_fields = False # include private fields?
+    include_cls_id = False # include '_cls_' field indicating which class generates the data
+
+    def default(self, obj):
+        try:
+            return super().default(obj)
+        except:
+            # To minimize serialized data size, only instantiated fields are saved and the fields defined in class are ignored.
+            r = dict(obj.__dict__) if self.enable_all_fields else { k:v for k,v in obj.__dict__.items() if not k.startswith('_') }
+            if self.include_cls_id:
+                r['_cls_'] = type(obj).__name__
+            return r
+
 class _APIWrapper(object):
     def __init__(self, f):
         self.__module__ = f.__module__
@@ -95,12 +114,15 @@ class _APIWrapper(object):
             return JsonResponse({
                     'error': None,
                     'result': r, 
-                }, safe = False)
+                }, safe = False, encoder = _MyJSONEncoder)
         except:
+            ex = sys.exc_info()
             return JsonResponse({
-                    'error': sys.exc_info()[0],
+                    'error': ex[0].__name__,
+                    'stack': traceback.format_exception(*ex),
+
                     'result': None, 
-                }, safe = False)
+                }, safe = False, encoder = _MyJSONEncoder)
 
 
     @property
