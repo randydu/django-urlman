@@ -18,7 +18,7 @@ urlpatterns = [
     path('polls/', include('polls.urls')),
     path('admin/', admin.site.urls),
 
-    # django-urlman aware apps
+    # mounting django-urlman aware apps
     * mount('mysite', # main project name 
        {
         'app1': 'app1/', # mount app1 at anchor 'app1/'
