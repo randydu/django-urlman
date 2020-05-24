@@ -16,3 +16,6 @@ def test_api_param_url():
 
     def h(a:int,b): pass
     assert _APIWrapper(h).param_url == 'a/<int:a>/b/<b>'
+
+    def w(a:int,b=1): pass
+    assert _APIWrapper(w).param_url == 'a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
