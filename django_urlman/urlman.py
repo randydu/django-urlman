@@ -145,12 +145,20 @@ class _APIWrapper(object):
 
                 for x in self.names:
                     if x in mykwargs:
+                        # param provided by caller
                         if x in self.types:
                             typ = self.types[x]
+                            v = mykwargs[x]
+
                             try:
-                                v = get_converters()[typ.__name__].to_python(mykwargs[x])
+                                v = get_converters()[typ.__name__].to_python(v)
                             except KeyError:
-                                v = typ(mykwargs[x])
+                                # no matched converter, fall back to type constructor
+                                try:
+                                    v = typ(v)
+                                except:
+                                    pass
+                                
                             mykwargs[x] = v
                     else:
                         # param not provided by caller
