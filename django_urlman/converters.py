@@ -12,5 +12,14 @@ class FloatConverter:
     def to_url(self, value):
         return str(value)
 
+class BoolConverter:
+    regex = '(?i)true'
+
+    def to_python(self, value):
+        return bool(value)
+
+    def to_url(self, value):
+        return 'true' if value else 'false'
 
 django.urls.register_converter(FloatConverter, 'float')
+django.urls.register_converter(BoolConverter, 'bool')

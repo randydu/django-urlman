@@ -89,6 +89,7 @@ class _APIWrapper(object):
         self.f = f
         self.defaults = {} # param's default value
         self.types = {}    # param's type annotation
+        self.pos_call = []  # pass param by position
         self.pos_only = []  # position only param
 
         params = inspect.signature(self.f).parameters
@@ -98,9 +99,12 @@ class _APIWrapper(object):
             param = params[x]
 
             if param.kind == inspect.Parameter.POSITIONAL_ONLY or param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
-                # can only be called via position
-                assert len(self.pos_only) == i
-                self.pos_only.append(x)
+                # call by position
+                assert len(self.pos_call) == i
+                self.pos_call.append(x)
+
+                if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+                    self.pos_only.append(x)
 
             v = param.default
 
@@ -115,10 +119,10 @@ class _APIWrapper(object):
                 self.types[x] = type(v)
 
     def _invoke(self, *args, **kwargs):
-        if self.pos_only:
-            # extract pos-only param 
+        if self.pos_call:
+            # extract call_by_pos params 
             myargs = []
-            for x in self.pos_only:
+            for x in self.pos_call:
                 myargs.append(kwargs[x])
                 kwargs.pop(x)
             myargs += args
@@ -180,7 +184,7 @@ class _APIWrapper(object):
     def param_url(self):
         if self.defaults:
             # has optional parameter, use re_path()
-            def get_one_url(x):
+            def get_one_url(i,x):
                 regex = '[^/]+'
                 
                 if x in self.types:
@@ -191,24 +195,27 @@ class _APIWrapper(object):
                         # unregistered converter 
                         pass
 
+                delimeter = '' if i == 0 else '/'
+
                 if x in self.defaults:
                     # x is optional
-                    return f"(?:/{x}/(?P<{x}>{regex}))?"
+                    return f"(?:{delimeter}(?P<{x}>{regex}))?" if x in self.pos_only else f"(?:{delimeter}{x}/(?P<{x}>{regex}))?"
                 else:
                     # x is not optional
-                    return f"/{x}/(?P<{x}>{regex})"
+                    return f"{delimeter}(?P<{x}>{regex})" if x in self.pos_only else f"{delimeter}{x}/(?P<{x}>{regex})"
 
         else:
             # no optional parameter, use path()
-            def get_one_url(x):
+            def get_one_url(i,x):
                 try:
                     typ = self.types[x].__name__ + ':'
                 except KeyError:
                     typ = ''
 
-                return f"/{x}/<{typ}{x}>"
+                delimeter = '' if i == 0 else '/'
+                return f"{delimeter}<{typ}{x}>" if x in self.pos_only else f"{delimeter}{x}/<{typ}{x}>"
 
-        return ''.join([ get_one_url(x) for x in self.names ]).lstrip('/')
+        return ''.join([ get_one_url(i,x) for i,x in enumerate(self.names) ])
 
     @property
     def has_optional_param(self):

@@ -11,11 +11,20 @@ def test_api_param_url():
     def f(a,b): pass
     assert _APIWrapper(f).param_url == 'a/<a>/b/<b>'
 
-    def g(a:int,b:int): pass
-    assert _APIWrapper(g).param_url == 'a/<int:a>/b/<int:b>'
+    def typed(a:int,b:int): pass
+    assert _APIWrapper(typed).param_url == 'a/<int:a>/b/<int:b>'
 
-    def h(a:int,b): pass
-    assert _APIWrapper(h).param_url == 'a/<int:a>/b/<b>'
+    def typed_mixed(a:int,b): pass
+    assert _APIWrapper(typed_mixed).param_url == 'a/<int:a>/b/<b>'
 
-    def w(a:int,b=1): pass
-    assert _APIWrapper(w).param_url == 'a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+    def optional(a:int,b=1): pass
+    assert _APIWrapper(optional).param_url == 'a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+
+    def pos_only(a,/,b):pass
+    assert _APIWrapper(pos_only).param_url == '<a>/b/<b>'
+
+    def pos_only_and_optional(a:int,/,b=1):pass
+    assert _APIWrapper(pos_only_and_optional).param_url == '(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+
+    def pos_only_and_optional1(a:int=0,/):pass
+    assert _APIWrapper(pos_only_and_optional1).param_url == '(?:(?P<a>[0-9]+))?'
