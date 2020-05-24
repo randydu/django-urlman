@@ -62,10 +62,6 @@ def mount(prj:str, apps: dict = None):
 
 
 
-def url(f):
-    """ url decorator for function """
-    _urls.append(f)
-    return f
 
 class _MyJSONEncoder(DjangoJSONEncoder):
     enable_all_fields = False # include private fields?
@@ -82,9 +78,10 @@ class _MyJSONEncoder(DjangoJSONEncoder):
             return r
 
 class _APIWrapper(object):
-    def __init__(self, f):
+    def __init__(self, f, is_url = False):
         self.__module__ = f.__module__
         self.__name__ = f.__name__
+        self._is_url = is_url
 
         self.f = f
         self.defaults = {} # param's default value
@@ -93,9 +90,13 @@ class _APIWrapper(object):
         self.pos_only = []  # position only param
 
         params = inspect.signature(self.f).parameters
+        
         self.names = [*params]
+        if is_url:
+            # skip first parameter (request)
+            self.names = self.names[1:]
 
-        for i, x in enumerate(params):
+        for i, x in enumerate(self.names):
             param = params[x]
 
             if param.kind == inspect.Parameter.POSITIONAL_ONLY or param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
@@ -118,7 +119,7 @@ class _APIWrapper(object):
                 self.defaults[x] = v
                 self.types[x] = type(v)
 
-    def _invoke(self, *args, **kwargs):
+    def _invoke(self, req, *args, **kwargs):
         if self.pos_call:
             # extract call_by_pos params 
             myargs = []
@@ -127,12 +128,21 @@ class _APIWrapper(object):
                 kwargs.pop(x)
             myargs += args
 
-            if kwargs:
-                r = self.f(*myargs, **kwargs)
+            if self._is_url:
+                if kwargs:
+                    r = self.f(req, *myargs, **kwargs)
+                else:
+                    r = self.f(req, *myargs)
             else:
-                r = self.f(*myargs)
+                if kwargs:
+                    r = self.f(*myargs, **kwargs)
+                else:
+                    r = self.f(*myargs)
         else:
-            r = self.f(*args, **kwargs)
+            if self._is_url:
+                r = self.f(req, *args, **kwargs)
+            else:
+                r = self.f(*args, **kwargs)
         
         return r
 
@@ -158,18 +168,18 @@ class _APIWrapper(object):
                                     v = typ(v)
                                 except:
                                     pass
-                                
+
                             mykwargs[x] = v
                     else:
                         # param not provided by caller
                         if x in self.defaults:
                             mykwargs[x] = self.defaults[x]
 
-                r = self._invoke(*args, **mykwargs)
+                r = self._invoke(req, *args, **mykwargs)
 
             else:
                 # path() has done type conversion so just pass them directly to wrapped function
-                r = self._invoke(*args, **kwargs)
+                r = self._invoke(req, *args, **kwargs)
 
             if isinstance(r, HttpResponseBase):
                 return r
@@ -241,5 +251,10 @@ def api(f):
     the api's url => {pkg_mnt}/{module}/{func_name}/a/1/b/2
 
     """
-    _urls.append(_APIWrapper(f))
+    _urls.append(_APIWrapper(f, is_url = False))
+    return f
+
+def url(f):
+    """ url decorator for function """
+    _urls.append(_APIWrapper(f, is_url = True))
     return f
