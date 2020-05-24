@@ -12,17 +12,40 @@ from django.urls.converters import get_converters
 from . import converters
 
 _urls = []
+_module_maps = {} # mapping module to a url
 
-def _geturl(prj, apps, pkg, module, fname, param_url):
+def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None):
     """ deduce url from meta info """
+    module_maps = module_maps or _module_maps
     segs = module.split('.')
     app = pkg if pkg != '' else segs[0]
     anchor = apps.get(app, app) if app != prj else ''
 
+    parts = segs[1:]
+    try:
+        # exact match first
+        parts = module_maps[module].split('/')
+    except:
+        # searching partial matching
+        for i in sorted(module_maps, key=lambda x: len(x), reverse=True):
+            if module.startswith(i):
+                leftover = module[len(i):]
+                if len(leftover) == 0:
+                    parts = module_maps[i].split('/')
+                    break
+                elif leftover[0] == '.':
+                    parts = module_maps[i].split('/') + leftover[1:].split('.')
+                    break
+    
+    while parts and parts[0] == '':
+        parts = parts[1:]
+
+    parts.append(fname)
+
     if anchor == '':
-        url = '/'.join(segs[1:] + [fname, ])
+        url = '/'.join(parts)
     else:
-        url = '/'.join([anchor.rstrip('/'),] + segs[1:] + [fname, ])
+        url = '/'.join([anchor.rstrip('/'),] + parts)
     
     return url if param_url == '' else '/'.join((url, param_url))
 
@@ -258,3 +281,14 @@ def url(f):
     """ url decorator for function """
     _urls.append(_APIWrapper(f, is_url = True))
     return f
+
+def map_module(module, url):
+    """ maps module to a url """
+    if inspect.ismodule(module):
+        nm = module.__name__
+    elif isinstance(module, str):
+        nm = module
+    else:
+        raise ValueError("'module' must be either a module or a module name")
+
+    _module_maps[nm] = url

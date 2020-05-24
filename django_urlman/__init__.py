@@ -6,7 +6,7 @@ __version__ = "0.2.0"
 __license__ = "MIT"
 __author__ = "Randy Du <randydu@gmail.com>"
 
-from .urlman import mount, url, api
+from .urlman import mount, url, api, map_module
 
 def _dump_urls():
     """ dump internal urls (internal) """
