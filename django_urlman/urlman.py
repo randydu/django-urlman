@@ -109,7 +109,7 @@ class _APIWrapper(object):
     def __init__(self, f, is_url = False, **kwargs):
         self.f = f
         self.func_name = kwargs.get('func_name', f.__name__)
-        self.url_name = kwargs.get('name', '.'.join([f.__module__,f.__name__]))
+        self.url_name = kwargs.get('name', '.'.join([f.__module__,self.func_name]))
 
         self._is_url = is_url
 
@@ -304,3 +304,12 @@ def map_module(module, url):
         raise ValueError("'module' must be either a module or a module name")
 
     _module_maps[nm] = url
+
+
+def _get_wrapper(f):
+    """ [INTERNAL] get the wrapper of a wrapped function """
+    for x in _urls:
+        if x.f is f:
+            return x
+    
+    raise ValueError('f is not wrapped by @api/@url')

@@ -13,10 +13,16 @@ class FloatConverter:
         return str(value)
 
 class BoolConverter:
-    regex = '(?i)true'
+    regex = '(?i)(true|false)'
 
     def to_python(self, value):
-        return bool(value)
+        s = value.lower()
+        if s in ('true', '1'):
+            return True
+        elif s in ('false', '0'):
+            return False
+        
+        raise ValueError(f'value ({value}) cannot be converted to bool')
 
     def to_url(self, value):
         return 'true' if value else 'false'
