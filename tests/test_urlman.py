@@ -1,4 +1,4 @@
-from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url
+from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module
 
 def test_geturl():
     prj = "coolsite"
@@ -17,6 +17,7 @@ def test_geturl():
     assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced.internal', 'add2', '', 
         module_maps = {'mymath.algo':'base', 'mymath.algo.advanced':'super'}) == 'math/super/internal/add2/'
 
+    assert _geturl(prj, {}, '', 'health', 'ping', '', app_url="check") == 'health/check/'
 
 def test_api_param_url():
     @api
@@ -63,3 +64,41 @@ def test_names():
     wrp =_get_wrapper(show_details2)
     assert wrp.func_name == 'details'
     assert wrp.url_name == 'xxx'
+
+
+def test_class_based_view():
+    class Hello:
+        def __call__(self, who):
+            return 'hello ' + who
+    
+    h = Hello()
+    api(h)
+    assert _get_wrapper(h).param_url == 'who/<who>'
+
+urlpatterns =[]
+
+def test_site_url():
+    @api
+    def hello():pass
+    
+    wrp = _get_wrapper(hello)
+    assert wrp.url == None
+    assert wrp.site_url == None
+
+    @api(url='')
+    def index():pass
+    
+    mount(urlconf=__name__) # mount all registered apis
+
+    assert _get_wrapper(hello).site_url == 'test_urlman/hello/'
+    assert _get_wrapper(index).site_url == 'test_urlman/'
+
+
+
+
+def test_api_binding():
+    @api
+    def hello(a:int):
+        assert a == 1
+
+    hello(1)

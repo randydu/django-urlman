@@ -11,4 +11,8 @@ from .urlman import mount, url, api, map_module
 def _dump_urls():
     """ dump internal urls (internal) """
     from .urlman import _urls
-    print(*_urls)
+
+    print('*** Dump of all registered urls ***\n')
+    
+    for i, url in enumerate(_urls):
+        print(f'[{i}] {url.site_url}\n')

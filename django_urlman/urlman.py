@@ -2,46 +2,51 @@ import sys
 import importlib
 import inspect
 import traceback
+import functools
 
 from django.urls import path, re_path
 from django.http.response import HttpResponseBase, JsonResponse
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls.converters import get_converters
 
-# make sure extra converters are registered.
+# make sure built-in converters are registered.
 from . import converters
 
 _urls = []
 _module_maps = {} # mapping module to a url
 
-def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None):
+def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None, app_url = None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
     app = pkg if pkg != '' else segs[0]
     anchor = apps.get(app, app) if app != prj else ''
 
-    parts = segs[1:]
-    try:
-        # exact match first
-        parts = module_maps[module].split('/')
-    except:
-        # searching partial matching
-        for i in sorted(module_maps, key=lambda x: len(x), reverse=True):
-            if module.startswith(i):
-                leftover = module[len(i):]
-                if len(leftover) == 0:
-                    parts = module_maps[i].split('/')
-                    break
-                elif leftover[0] == '.':
-                    parts = module_maps[i].split('/') + leftover[1:].split('.')
-                    break
-    
-    while parts and parts[0] == '':
-        parts = parts[1:]
+    if app_url is None:
+        parts = segs[1:]
+        try:
+            # exact match first
+            parts = module_maps[module].split('/')
+        except:
+            # searching partial matching
+            for i in sorted(module_maps, key=lambda x: len(x), reverse=True):
+                if module.startswith(i):
+                    leftover = module[len(i):]
+                    if len(leftover) == 0:
+                        parts = module_maps[i].split('/')
+                        break
+                    elif leftover[0] == '.':
+                        parts = module_maps[i].split('/') + leftover[1:].split('.')
+                        break
+        
+        while parts and parts[0] == '':
+            parts = parts[1:]
 
-    if fname:
-        parts.append(fname)
+        if fname:
+            parts.append(fname)
+    else:
+        # app-wide url is specified
+        parts = app_url.strip(' /').split('/')
 
     if anchor == '':
         url = '/'.join(parts)
@@ -57,9 +62,38 @@ def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None):
 
 
 
-def mount(prj:str, apps: dict = None):
-    """ Mount all registered urls """
-    if apps is not None:
+def _get_all_paths(prj:str, apps: dict):
+    """ get all all registered urls """
+    
+    # resolve paths
+    paths = []
+    #for pkg, module, api, handler in _urls:
+    for x in _urls:
+        if x.site_url is None:
+            # site_url not specified, resolve it... 
+            m = sys.modules[x.f.__module__]
+            x.site_url = _geturl(prj, apps, m.__package__, x.f.__module__, x.func_name, x.param_url, app_url=x.url)
+        
+        xpath = re_path if x.has_optional_param else path
+        paths.append(xpath(x.site_url, x, name = x.url_name))
+
+    return paths
+
+def mount(apps: dict = {}, urlconf = None):
+    import django.conf
+
+    urlconf = urlconf or django.conf.settings.ROOT_URLCONF
+    mroot = importlib.import_module(urlconf)
+    prj = mroot.__package__
+
+    # Loading apps will trigger registration of all app urls/apis.
+    #
+    # If an app does not appear explicitly in "apps" dictionary, it must be imported somewhere 
+    # in order to register its apis.
+    #
+    # When app is in "apps" dictionary, it can specify the mounting point in the site / project,
+    # otherwise its mounting point will be the app's package name. (<package_name>/)
+    if apps:
         if not isinstance(apps, dict):
             raise ValueError("apps must be a dictionary!")
 
@@ -69,26 +103,13 @@ def mount(prj:str, apps: dict = None):
                 m = importlib.import_module(app)
                 if hasattr(m, '__path__'):
                     import pkgutil
-                    # package
+                    # package, loading all modules except special files (setup.py)
                     for _, name, _ in pkgutil.iter_modules(m.__path__):
                         if name not in ('setup'):
                             importlib.import_module('.'+name, package=app)
+
     
-    # resolve paths
-    paths = []
-    #for pkg, module, api, handler in _urls:
-    for x in _urls:
-        m = sys.modules[x.f.__module__]
-        url = _geturl(prj, apps, m.__package__, x.f.__module__, x.func_name, x.param_url)
-        
-        print('\nurl: %s' % url )
-
-        xpath = re_path if x.has_optional_param else path
-        paths.append(xpath(url, x, name = x.url_name))
-
-    return paths
-
-
+    mroot.urlpatterns += _get_all_paths(prj, apps)
 
 
 class _MyJSONEncoder(DjangoJSONEncoder):
@@ -108,8 +129,10 @@ class _MyJSONEncoder(DjangoJSONEncoder):
 class _APIWrapper(object):
     def __init__(self, f, is_url = False, **kwargs):
         self.f = f
-        self.func_name = kwargs.get('func_name', f.__name__)
-        self.url_name = kwargs.get('name', '.'.join([f.__module__,self.func_name]))
+        self.func_name = kwargs.get('func_name', f.__name__ if hasattr(f, '__name__') else f.__class__.__name__)
+        self.url_name = kwargs.get('name', f.__module__ + '.' + self.func_name)
+        self.url = kwargs.get('url', None) # app-wide url
+        self.site_url = kwargs.get('site_url', None) # site-wide url
 
         self._is_url = is_url
 
@@ -273,26 +296,19 @@ def _wrap(f, is_url, **kwargs):
     return f
 
 
-
-def api(f = None, **kwargs):
-    if inspect.isfunction(f):
-        # decorator without parameters
-        return _wrap(f, False)
+def _api(f = None, is_url = False, **kwargs):
+    if callable(f):
+        # decorator without parameters, or called directly with api(f)
+        return _wrap(f, is_url, **kwargs)
     else:
         # decorator with parameters
         def wrap(func):
-            return _wrap(func, False, **kwargs)
+            return _wrap(func, is_url, **kwargs)
         return wrap
 
-def url(f = None, **kwargs):
-    if inspect.isfunction(f):
-        # decorator without parameters
-        return _wrap(f, True)
-    else:
-        # decorator with parameters
-        def wrap(func):
-            return _wrap(func, True, **kwargs)
-        return wrap
+api = functools.partial(_api, is_url = False)
+url = functools.partial(_api, is_url = True)
+
 
 def map_module(module, url):
     """ maps module to a url """
