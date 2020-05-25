@@ -2,18 +2,20 @@ from django_urlman.urlman import _geturl, _APIWrapper
 
 def test_geturl():
     prj = "coolsite"
-    assert _geturl(prj, {}, '', 'health', 'ping', '') == 'health/ping'
-    assert _geturl(prj, { 'mymath': 'math'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', 'a/<int:a>/b/<int:b>') == 'math/algo/add/a/<int:a>/b/<int:b>'
+    assert _geturl(prj, {}, '', 'health', 'ping', '') == 'health/ping/'
+    assert _geturl(prj, { 'mymath': 'math'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '', '') == 'math/algo/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '', 'xx') == 'math/algo/xx/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', 'a/<int:a>/b/<int:b>') == 'math/algo/add/a/<int:a>/b/<int:b>/'
 
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '', module_maps = {'mymath.algo':''}) == 'math/add'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '', module_maps = {'mymath.algo':''}) == 'math/add/'
     assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', 'add1', '', 
-        module_maps = {'mymath.algo':''}) == 'math/advanced/add1'
+        module_maps = {'mymath.algo':''}) == 'math/advanced/add1/'
     assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', 'add1', '', 
-        module_maps = {'mymath.algo':'', 'mymath.algo.advanced':'super'}) == 'math/super/add1'
+        module_maps = {'mymath.algo':'', 'mymath.algo.advanced':'super'}) == 'math/super/add1/'
     assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced.internal', 'add2', '', 
-        module_maps = {'mymath.algo':'base', 'mymath.algo.advanced':'super'}) == 'math/super/internal/add2'
+        module_maps = {'mymath.algo':'base', 'mymath.algo.advanced':'super'}) == 'math/super/internal/add2/'
 
 
 def test_api_param_url():

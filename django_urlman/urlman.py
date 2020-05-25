@@ -40,14 +40,20 @@ def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None):
     while parts and parts[0] == '':
         parts = parts[1:]
 
-    parts.append(fname)
+    if fname:
+        parts.append(fname)
 
     if anchor == '':
         url = '/'.join(parts)
     else:
         url = '/'.join([anchor.rstrip('/'),] + parts)
     
-    return url if param_url == '' else '/'.join((url, param_url))
+    r = url if param_url == '' else '/'.join((url, param_url))
+        
+    # force trailing slash to avoid potential django route resolving issue.
+    if not r.endswith('/'):
+        r+='/'
+    return r
 
 
 
@@ -72,14 +78,13 @@ def mount(prj:str, apps: dict = None):
     paths = []
     #for pkg, module, api, handler in _urls:
     for x in _urls:
-        is_wrapper = isinstance(x, _APIWrapper)
-        m = sys.modules[x.__module__]
-        url = _geturl(prj, apps, m.__package__, x.__module__, x.__name__, x.param_url if is_wrapper else '')
+        m = sys.modules[x.f.__module__]
+        url = _geturl(prj, apps, m.__package__, x.f.__module__, x.func_name, x.param_url)
         
         print('\nurl: %s' % url )
 
-        xpath = re_path if is_wrapper and x.has_optional_param else path
-        paths.append(xpath(url, x))
+        xpath = re_path if x.has_optional_param else path
+        paths.append(xpath(url, x, name = x.url_name))
 
     return paths
 
@@ -101,12 +106,13 @@ class _MyJSONEncoder(DjangoJSONEncoder):
             return r
 
 class _APIWrapper(object):
-    def __init__(self, f, is_url = False):
-        self.__module__ = f.__module__
-        self.__name__ = f.__name__
+    def __init__(self, f, is_url = False, **kwargs):
+        self.f = f
+        self.func_name = kwargs.get('func_name', f.__name__)
+        self.url_name = kwargs.get('name', '.'.join([f.__module__,f.__name__]))
+
         self._is_url = is_url
 
-        self.f = f
         self.defaults = {} # param's default value
         self.types = {}    # param's type annotation
         self.pos_call = []  # pass param by position
@@ -262,25 +268,31 @@ class _APIWrapper(object):
     def has_optional_param(self):
         return self.defaults != {}
 
-
-
-def api(f):
-    """ api decorator 
-    
-    @api
-    def add(a,b):
-        return a+b
-
-    the api's url => {pkg_mnt}/{module}/{func_name}/a/1/b/2
-
-    """
-    _urls.append(_APIWrapper(f, is_url = False))
+def _wrap(f, is_url, **kwargs):
+    _urls.append(_APIWrapper(f, is_url, **kwargs))
     return f
 
-def url(f):
-    """ url decorator for function """
-    _urls.append(_APIWrapper(f, is_url = True))
-    return f
+
+
+def api(f = None, **kwargs):
+    if inspect.isfunction(f):
+        # decorator without parameters
+        return _wrap(f, False)
+    else:
+        # decorator with parameters
+        def wrap(func):
+            return _wrap(func, False, **kwargs)
+        return wrap
+
+def url(f = None, **kwargs):
+    if inspect.isfunction(f):
+        # decorator without parameters
+        return _wrap(f, True)
+    else:
+        # decorator with parameters
+        def wrap(func):
+            return _wrap(func, True, **kwargs)
+        return wrap
 
 def map_module(module, url):
     """ maps module to a url """
