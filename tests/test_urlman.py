@@ -1,4 +1,4 @@
-from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module, APIResult
+from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE
 
 from . import settings
 
@@ -100,6 +100,24 @@ def test_site_url():
     def hello(a=1):
         return a
 
+    @api(methods=['GET'])
+    def get_only1():
+        pass
+
+    @GET
+    @api
+    def get_only2():
+        pass
+
+    @READ
+    @api
+    def read_only():
+        pass
+
+    @WRITE
+    @api
+    def write_only():
+        pass
 
     map_module(__name__,'')
     # mount(urlconf=__name__) # mount all registered apis
@@ -170,3 +188,42 @@ def test_site_url():
     r = APIResult(response)
     assert r.error == None
     assert r.result == 2
+
+    # method
+    response = client.get('/get_only1/')
+    r = APIResult(response)
+    assert r.error == None
+    
+    response = client.get('/get_only2/')
+    r = APIResult(response)
+    assert r.error == None
+
+    response = client.post('/get_only2/')
+    assert response.status_code == 405 # not allowed
+
+    # read
+    response = client.head('/read_only/')
+    assert response.status_code == 200 # allowed
+    response = client.get('/read_only/')
+    assert response.status_code == 200 # allowed
+
+    response = client.post('/read_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.put('/read_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.patch('/read_only/')
+    assert response.status_code == 405 # not allowed
+
+
+    # write
+    response = client.head('/write_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.get('/write_only/')
+    assert response.status_code == 405 # not allowed
+
+    response = client.post('/write_only/')
+    assert response.status_code == 200 # allowed
+    response = client.put('/write_only/')
+    assert response.status_code == 200 # allowed
+    response = client.patch('/write_only/')
+    assert response.status_code == 200 # allowed

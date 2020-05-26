@@ -6,7 +6,7 @@ import functools
 import json
 
 from django.urls import path, re_path
-from django.http.response import HttpResponseBase, JsonResponse
+from django.http.response import HttpResponseBase, JsonResponse, HttpResponseNotAllowed, HttpResponseBadRequest
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls.converters import get_converters
 
@@ -137,6 +137,7 @@ class _APIWrapper(object):
         self.url_name = kwargs.get('name', f.__module__ + '.' + self.func_name)
         self.url = kwargs.get('url', None) # app-wide url
         self.site_url = kwargs.get('site_url', None) # site-wide url
+        self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
 
         self._is_url = is_url
 
@@ -229,6 +230,10 @@ class _APIWrapper(object):
 
     def __call__(self, req, *args, **kwargs):
         try:
+            # check the method permission
+            if self.methods and req.method.upper() not in self.methods:
+                return HttpResponseNotAllowed(self.methods)
+
             if self.has_optional_param or self.param_autos:
                 # re_path() does not cope with type conversion so we have to do it manually
                 # non-empty param_autos means some params needed to be retrieved from other parts of request
@@ -286,7 +291,7 @@ class _APIWrapper(object):
                             mykwargs[x] = self._type_cast(x, v)
 
                         if not found and not args: # todo: check positional params in args
-                            raise ValueError('parameter (%s) not found' % x)
+                            return HttpResponseBadRequest('parameter (%s) not found' % x)
 
                 r = self._invoke(req, *args, **mykwargs)
 
@@ -403,3 +408,44 @@ class APIResult:
     @property
     def result(self):
         return self.r['result']
+
+# method decorators
+# ref: @api(methods=['GET','HEAD'])
+    '''@get : only support method GET
+    
+        @GET
+        @api
+        def foo():pass
+
+        @GET
+        @HEAD
+        @api
+        def bar():pass
+
+        is equal to:
+
+        @api(methods = ['GET', 'HEAD'])
+        def bar():pass
+    '''
+
+def _add_method(f, *, method):
+    wrp = _get_wrapper(f)
+    if isinstance(method, str):
+        wrp.methods = { *wrp.methods, method}
+    else:
+        wrp.methods = { *wrp.methods, *method}
+    return f
+
+GET = functools.partial(_add_method, method='GET')
+POST = functools.partial(_add_method, method='POST')
+PUT = functools.partial(_add_method, method='PUT')
+HEAD = functools.partial(_add_method, method='HEAD')
+DELETE = functools.partial(_add_method, method='DELETE')
+PATCH = functools.partial(_add_method, method='PATCH')
+CONNECT = functools.partial(_add_method, method='CONNECT')
+OPTIONS = functools.partial(_add_method, method='OPTIONS')
+TRACE = functools.partial(_add_method, method='TRACE')
+
+# macros
+READ = functools.partial(_add_method, method = ('GET', 'HEAD'))
+WRITE = functools.partial(_add_method, method = ('POST', 'PUT', 'PATCH'))
