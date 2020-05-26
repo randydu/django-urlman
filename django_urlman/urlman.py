@@ -264,10 +264,19 @@ class _APIWrapper(object):
 
                                 # search in cookie
                                 try:
-                                    v = req.get_signed_cookie(x)
+                                    # v = req.get_signed_cookie(x)
+                                    v = req.COOKIES[x]
                                     found = True
                                 except:
                                     pass
+
+                                # search session
+                                if hasattr(req, 'session'):
+                                    try:
+                                        v = req.session[x]
+                                        found = True
+                                    except:
+                                        pass
 
                         if not found:
                             if x in self.defaults:

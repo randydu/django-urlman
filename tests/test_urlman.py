@@ -121,23 +121,39 @@ def test_site_url():
     from django.test import Client
     client = Client()
 
-    response = client.post('/t1/',{'a':2}, content_type='application/json')
+    response = client.post('/t1/',{'a':2}, content_type='application/json') # body: application/json
     assert response.status_code == 200
     r = APIResult(response)
     assert r.error == None
     assert r.result == 2
 
-    response = client.post('/t1/',{'a':3})
+    response = client.post('/t1/',{'a':3}) # from body: multipart/form-data
     assert response.status_code == 200
     r = APIResult(response)
     assert r.error == None
     assert r.result == 3
 
-    response = client.post('/t1/?a=4')
+    response = client.post('/t1/?a=4') # from query-string
     assert response.status_code == 200
     r = APIResult(response)
     assert r.error == None
     assert r.result == 4
+
+    client.cookies['a'] = 5
+    response = client.post('/t1/') # from cookie
+    assert response.status_code == 200
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 5
+
+    if False: #todo: setup testing env properly
+        client.cookies.pop('a')
+        client.session['a'] = 6
+        response = client.post('/t1/') # from session
+        assert response.status_code == 200
+        r = APIResult(response)
+        assert r.error == None
+        assert r.result == 6
 
     # api-binding
     url =_get_wrapper(hello).site_url
