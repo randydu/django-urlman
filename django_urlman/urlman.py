@@ -53,12 +53,12 @@ def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None, app
     else:
         url = '/'.join([anchor.rstrip('/'),] + parts)
     
-    r = url if param_url == '' else '/'.join((url, param_url))
+    url += param_url
         
     # force trailing slash to avoid potential django route resolving issue.
-    if not r.endswith('/'):
-        r+='/'
-    return r
+    if not url.endswith('/'):
+        url+='/'
+    return url
 
 
 
@@ -252,9 +252,11 @@ class _APIWrapper(object):
 
     @property
     def param_url(self):
+        # param-based url.
+        # '' if no param; it has the leading slash if needed, no trailing slash. 
         if self.defaults:
             # has optional parameter, use re_path()
-            def get_one_url(i,x):
+            def get_one_url(x):
                 regex = '[^/]+'
                 
                 if x in self.types:
@@ -265,27 +267,24 @@ class _APIWrapper(object):
                         # unregistered converter 
                         pass
 
-                delimeter = '' if i == 0 else '/'
-
                 if x in self.defaults:
                     # x is optional
-                    return f"(?:{delimeter}(?P<{x}>{regex}))?" if x in self.pos_only else f"(?:{delimeter}{x}/(?P<{x}>{regex}))?"
+                    return f"(?:/(?P<{x}>{regex}))?" if x in self.pos_only else f"(?:/{x}/(?P<{x}>{regex}))?"
                 else:
                     # x is not optional
-                    return f"{delimeter}(?P<{x}>{regex})" if x in self.pos_only else f"{delimeter}{x}/(?P<{x}>{regex})"
+                    return f"/(?P<{x}>{regex})" if x in self.pos_only else f"/{x}/(?P<{x}>{regex})"
 
         else:
             # no optional parameter, use path()
-            def get_one_url(i,x):
+            def get_one_url(x):
                 try:
                     typ = self.types[x].__name__ + ':'
                 except KeyError:
                     typ = ''
 
-                delimeter = '' if i == 0 else '/'
-                return f"{delimeter}<{typ}{x}>" if x in self.pos_only else f"{delimeter}{x}/<{typ}{x}>"
+                return f"/<{typ}{x}>" if x in self.pos_only else f"/{x}/<{typ}{x}>"
 
-        return ''.join([ get_one_url(i,x) for i,x in enumerate(self.names) ])
+        return ''.join([ get_one_url(x) for x in self.names ])
 
     @property
     def has_optional_param(self):
