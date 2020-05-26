@@ -1,4 +1,7 @@
-from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module
+from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module, APIResult
+
+from . import settings
+
 
 def test_geturl():
     prj = "coolsite"
@@ -71,38 +74,83 @@ def test_names():
 
 
 def test_class_based_view():
-    class Hello:
+    class SayHello:
         def __call__(self, who):
             return 'hello ' + who
     
-    h = Hello()
+    h = SayHello()
     api(h)
     assert _get_wrapper(h).param_url == '/who/<who>'
 
-urlpatterns =[]
+#urlpatterns =[]
 
 def test_site_url():
     @api
-    def hello():pass
+    def hey():pass
     
-    wrp = _get_wrapper(hello)
-    assert wrp.url == None
-    assert wrp.site_url == None
+    # api_binding_auto
+    @api(param_autos=('a'))
+    def t1(a:int):
+        return a
 
     @api(url='')
     def index():pass
-    
-    mount(urlconf=__name__) # mount all registered apis
 
-    assert _get_wrapper(hello).site_url == 'test_urlman/hello/'
-    assert _get_wrapper(index).site_url == 'test_urlman/'
-
-
-
-def test_api_binding():
     @api
     def hello(a=1):
-        assert a == 1
+        return a
 
-    mount(urlconf=__name__) # mount all registered apis
-    assert _get_wrapper(hello).site_url == 'test_urlman/hello(?:/a/(?P<a>[0-9]+))?/'
+
+    map_module(__name__,'')
+    # mount(urlconf=__name__) # mount all registered apis
+    mount(only_me=True) # mount all registered apis
+
+    
+    # --- hey ---
+    wrp = _get_wrapper(hey)
+    assert wrp.url == None
+    assert wrp.site_url == 'hey/'
+
+    assert _get_wrapper(index).site_url == '/'
+
+
+    # test auto-binding
+    url =_get_wrapper(t1).site_url
+    assert url == 't1/'
+
+    from django.test import Client
+    client = Client()
+
+    response = client.post('/t1/',{'a':2}, content_type='application/json')
+    assert response.status_code == 200
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 2
+
+    response = client.post('/t1/',{'a':3})
+    assert response.status_code == 200
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 3
+
+    response = client.post('/t1/?a=4')
+    assert response.status_code == 200
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 4
+
+    # api-binding
+    url =_get_wrapper(hello).site_url
+    assert url == 'hello(?:/a/(?P<a>[0-9]+))?/'
+
+    response = client.get('/hello/')
+    assert response.status_code == 200
+    
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 1
+    
+    response = client.get('/hello/a/2/')
+    r = APIResult(response)
+    assert r.error == None
+    assert r.result == 2

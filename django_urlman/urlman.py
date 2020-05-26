@@ -3,6 +3,7 @@ import importlib
 import inspect
 import traceback
 import functools
+import json
 
 from django.urls import path, re_path
 from django.http.response import HttpResponseBase, JsonResponse
@@ -79,7 +80,7 @@ def _get_all_paths(prj:str, apps: dict):
 
     return paths
 
-def mount(apps: dict = {}, urlconf = None):
+def mount(apps: dict = {}, *, urlconf = None, only_me = False):
     import django.conf
 
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
@@ -109,7 +110,10 @@ def mount(apps: dict = {}, urlconf = None):
                             importlib.import_module('.'+name, package=app)
 
     
-    mroot.urlpatterns += _get_all_paths(prj, apps)
+    if only_me:
+        mroot.urlpatterns = _get_all_paths(prj, apps)
+    else:
+        mroot.urlpatterns += _get_all_paths(prj, apps)
 
 
 class _MyJSONEncoder(DjangoJSONEncoder):
@@ -140,6 +144,7 @@ class _APIWrapper(object):
         self.types = {}    # param's type annotation
         self.pos_call = []  # pass param by position
         self.pos_only = []  # position only param
+        self.param_autos = kwargs.get('param_autos', ()) # param should be retrieved from body, query
 
         params = inspect.signature(self.f).parameters
 
@@ -204,34 +209,75 @@ class _APIWrapper(object):
         
         return r
 
+    def _type_cast(self, x,v):
+        # cast param x to registered type
+        if x in self.types:
+            typ = self.types[x]
+
+            if not isinstance(v, typ):
+                try:
+                    v = get_converters()[typ.__name__].to_python(v)
+                except KeyError:
+                    # no matched converter, fall back to type constructor
+                    try:
+                        v = typ(v)
+                    except:
+                        pass
+        return v
+
+
 
     def __call__(self, req, *args, **kwargs):
         try:
-            if self.has_optional_param:
+            if self.has_optional_param or self.param_autos:
                 # re_path() does not cope with type conversion so we have to do it manually
+                # non-empty param_autos means some params needed to be retrieved from other parts of request
                 mykwargs = { **kwargs }
 
                 for x in self.names:
                     if x in mykwargs:
                         # param provided by caller
-                        if x in self.types:
-                            typ = self.types[x]
-                            v = mykwargs[x]
-
-                            try:
-                                v = get_converters()[typ.__name__].to_python(v)
-                            except KeyError:
-                                # no matched converter, fall back to type constructor
+                        mykwargs[x] = self._type_cast(x, mykwargs[x])
+                    else:
+                        # param not provided by caller
+                        found = False
+                        if x in self.param_autos:
+                            if req.content_type == 'application/json':
+                                content = json.loads(req.body)
+                                if x in content:
+                                    v = content[x]
+                                    found = True
+                            else:
+                                # search in POST which is parsed from body.
                                 try:
-                                    v = typ(v)
+                                    v = req.POST[x]
+                                    found = True
                                 except:
                                     pass
 
-                            mykwargs[x] = v
-                    else:
-                        # param not provided by caller
-                        if x in self.defaults:
-                            mykwargs[x] = self.defaults[x]
+                                # search in GET which is parsed from query-string.
+                                try:
+                                    v = req.GET[x]
+                                    found = True
+                                except:
+                                    pass
+
+                                # search in cookie
+                                try:
+                                    v = req.get_signed_cookie(x)
+                                    found = True
+                                except:
+                                    pass
+
+                        if not found:
+                            if x in self.defaults:
+                                mykwargs[x] = self.defaults[x]
+                                found = True
+                        else:
+                            mykwargs[x] = self._type_cast(x, v)
+
+                        if not found and not args: # todo: check positional params in args
+                            raise ValueError('parameter (%s) not found' % x)
 
                 r = self._invoke(req, *args, **mykwargs)
 
@@ -290,7 +336,7 @@ class _APIWrapper(object):
 
                 return f"/<{typ}{x}>" if x in self.pos_only else f"/{x}/<{typ}{x}>"
 
-        return ''.join([ get_one_url(x) for x in self.names ])
+        return ''.join([ get_one_url(x) for x in self.names if x not in self.param_autos ])
 
     @property
     def has_optional_param(self):
@@ -334,3 +380,17 @@ def _get_wrapper(f):
             return x
     
     raise ValueError('f is not wrapped by @api/@url')
+
+class APIResult:
+    '''utility to retrieve result of api from response'''
+    def __init__(self, response):
+        self.r = json.loads(response.content)
+    @property
+    def error(self):
+        return self.r['error']
+    @property
+    def stack(self):
+        return self.r.get('stack', None)
+    @property
+    def result(self):
+        return self.r['result']
