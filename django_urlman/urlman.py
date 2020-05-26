@@ -142,6 +142,8 @@ class _APIWrapper(object):
         self.pos_only = []  # position only param
 
         params = inspect.signature(self.f).parameters
+
+        param_types = kwargs.get('param_types',{})
         
         self.names = [*params]
         if is_url:
@@ -166,6 +168,10 @@ class _APIWrapper(object):
                 cls = param.annotation
                 if cls != inspect._empty:
                     self.types[x] = cls
+                else:
+                    # decorator provided type annotation via 'param_types'
+                    if x in param_types:
+                        self.types[x] = param_types[x]
             else:
                 # has default value
                 self.defaults[x] = v
