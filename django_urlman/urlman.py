@@ -4,6 +4,7 @@ import inspect
 import traceback
 import functools
 import json
+import warnings
 
 from django.urls import path, re_path
 from django.http.response import HttpResponseBase, JsonResponse, HttpResponseNotAllowed, HttpResponseBadRequest
@@ -66,6 +67,25 @@ def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None, app
 def _get_all_paths(prj:str, apps: dict):
     """ get all all registered urls """
     
+    def resolve_final_handler(x):
+        # the original handler might have been wrapped by extra decorators,
+        # so we must figure out the final handler as the view 
+        if not hasattr(x.f, '__name__'):
+            # class-based view, once wrapped by external (non-django-urlman) decorator, cannot be resolved.
+            # just returns the api-wrapper itself.
+            warnings.warn(f'class-based view {x.f.__class__.__name__} is not compatible with external decorators.')
+            return x
+        
+        try:
+            m = sys.modules[x.f.__module__]
+            y = getattr(m, x.f.__name__)
+            #if x is not y:
+            #    print(f'external decorator detected, {x.__name__}')
+            return y
+        except:
+            warnings.warn(f'view {x.f.__name__} cannot be resolved,  might be modified by imcompatible external decorators, or defined in local scope.')
+            return x
+
     # resolve paths
     paths = []
     #for pkg, module, api, handler in _urls:
@@ -76,7 +96,7 @@ def _get_all_paths(prj:str, apps: dict):
             x.site_url = _geturl(prj, apps, m.__package__, x.f.__module__, x.func_name, x.param_url, app_url=x.url)
         
         xpath = re_path if x.has_optional_param else path
-        paths.append(xpath(x.site_url, x, name = x.url_name))
+        paths.append(xpath(x.site_url, resolve_final_handler(x), name = x.url_name))
 
     return paths
 
@@ -132,6 +152,8 @@ class _MyJSONEncoder(DjangoJSONEncoder):
 
 class _APIWrapper(object):
     def __init__(self, f, is_url = False, **kwargs):
+        functools.update_wrapper(self, f, updated = ())
+
         self.f = f
         self.func_name = kwargs.get('func_name', f.__name__ if hasattr(f, '__name__') else f.__class__.__name__)
         self.url_name = kwargs.get('name', f.__module__ + '.' + self.func_name)
@@ -357,8 +379,9 @@ class _APIWrapper(object):
         return self.defaults != {}
 
 def _wrap(f, is_url, **kwargs):
-    _urls.append(_APIWrapper(f, is_url, **kwargs))
-    return f
+    wrp = _APIWrapper(f, is_url, **kwargs)
+    _urls.append(wrp)
+    return wrp
 
 
 def _api(f = None, is_url = False, **kwargs):
@@ -375,6 +398,23 @@ api = functools.partial(_api, is_url = False)
 url = functools.partial(_api, is_url = True)
 
 
+def get_wrapper(f):
+    ''' [INTERNAL] get the APIWrapper instance from wrapped function '''
+    if isinstance(f, _APIWrapper):
+        return f
+    
+    name = f.__name__ if hasattr(f, '__name__') else f.__class__.__name__
+    module = f.__module__
+
+    for x in _urls:
+        if x.__module__ == module and x.__name__ == name:
+            return x 
+    
+    raise ValueError('wrapper cannot be resolved, is it wrapped with @api/@url before?')
+
+
+
+
 def map_module(module, url):
     """ maps module to a url """
     if inspect.ismodule(module):
@@ -386,14 +426,6 @@ def map_module(module, url):
 
     _module_maps[nm] = url
 
-
-def _get_wrapper(f):
-    """ [INTERNAL] get the wrapper of a wrapped function """
-    for x in _urls:
-        if x.f is f:
-            return x
-    
-    raise ValueError('f is not wrapped by @api/@url')
 
 class APIResult:
     '''utility to retrieve result of api from response'''
@@ -429,11 +461,13 @@ class APIResult:
     '''
 
 def _add_method(f, *, method):
-    wrp = _get_wrapper(f)
+    if not isinstance(f, _APIWrapper):
+        raise ValueError('method decorator should be applied on top of @api/@url!')
+
     if isinstance(method, str):
-        wrp.methods = { *wrp.methods, method}
+        f.methods = { *f.methods, method}
     else:
-        wrp.methods = { *wrp.methods, *method}
+        f.methods = { *f.methods, *method}
     return f
 
 GET = functools.partial(_add_method, method='GET')

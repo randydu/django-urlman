@@ -1,4 +1,6 @@
-from django_urlman.urlman import _geturl, _APIWrapper, _get_wrapper, api, url, mount, map_module, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE
+from django_urlman.urlman import _geturl, _APIWrapper, api, url, mount, map_module, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE, get_wrapper
+
+from django.views.decorators.http import require_http_methods, require_GET, require_POST, require_safe
 
 from . import settings
 
@@ -25,35 +27,35 @@ def test_geturl():
 def test_api_param_url():
     @api
     def f(a,b): pass
-    assert _get_wrapper(f).param_url == '/a/<a>/b/<b>'
+    assert (f).param_url == '/a/<a>/b/<b>'
 
     @api
     def typed(a:int,b:int): pass
-    assert _get_wrapper(typed).param_url == '/a/<int:a>/b/<int:b>'
+    assert (typed).param_url == '/a/<int:a>/b/<int:b>'
 
     @api
     def typed_mixed(a:int,b): pass
-    assert _get_wrapper(typed_mixed).param_url == '/a/<int:a>/b/<b>'
+    assert (typed_mixed).param_url == '/a/<int:a>/b/<b>'
 
     @api
     def optional(a:int,b=1): pass
-    assert _get_wrapper(optional).param_url == '/a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+    assert (optional).param_url == '/a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
 
     @api
     def pos_only(a,/,b):pass
-    assert _get_wrapper(pos_only).param_url == '/<a>/b/<b>'
+    assert (pos_only).param_url == '/<a>/b/<b>'
 
     @api
     def pos_only_and_optional1(a:int,/,b=1):pass
-    assert _get_wrapper(pos_only_and_optional1).param_url == '/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+    assert (pos_only_and_optional1).param_url == '/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
 
     @api
     def pos_only_and_optional2(a:int,b=1,/):pass
-    assert _get_wrapper(pos_only_and_optional2).param_url == '/(?P<a>[0-9]+)(?:/(?P<b>[0-9]+))?'
+    assert (pos_only_and_optional2).param_url == '/(?P<a>[0-9]+)(?:/(?P<b>[0-9]+))?'
 
     @api
     def pos_only_and_optional1(a:int=0,/):pass
-    assert _get_wrapper(pos_only_and_optional1).param_url == '(?:/(?P<a>[0-9]+))?'
+    assert (pos_only_and_optional1).param_url == '(?:/(?P<a>[0-9]+))?'
 
 
 def test_names():
@@ -61,14 +63,14 @@ def test_names():
     @api(func_name='details')
     def show_details1(a:int,b:int): pass
 
-    wrp =_get_wrapper(show_details1)
+    wrp =(show_details1)
     assert wrp.func_name == 'details'
     assert wrp.url_name == show_details1.__module__ + '.details'
 
     @api(func_name='details', name='xxx')
     def show_details2(a:int,b:int): pass
 
-    wrp =_get_wrapper(show_details2)
+    wrp =(show_details2)
     assert wrp.func_name == 'details'
     assert wrp.url_name == 'xxx'
 
@@ -78,62 +80,67 @@ def test_class_based_view():
         def __call__(self, who):
             return 'hello ' + who
     
-    h = SayHello()
-    api(h)
-    assert _get_wrapper(h).param_url == '/who/<who>'
+    h = api(SayHello())
+    assert (h).param_url == '/who/<who>'
 
 #urlpatterns =[]
 
+@api
+def hey():pass
+
+# api_binding_auto
+@api(param_autos=('a'))
+def t1(a:int):
+    return a
+
+@api(url='')
+def index():pass
+
+@api
+def hello(a=1):
+    return a
+
+@api(methods=['GET'])
+def get_only1():
+    pass
+
+@GET
+@api
+def get_only2():
+    pass
+
+@READ
+@api
+def read_only():
+    pass
+
+@WRITE
+@api
+def write_only():
+    pass
+
+# django compatibility test
+@require_GET
+@api
+def get_only():
+    pass
+
 def test_site_url():
-    @api
-    def hey():pass
-    
-    # api_binding_auto
-    @api(param_autos=('a'))
-    def t1(a:int):
-        return a
-
-    @api(url='')
-    def index():pass
-
-    @api
-    def hello(a=1):
-        return a
-
-    @api(methods=['GET'])
-    def get_only1():
-        pass
-
-    @GET
-    @api
-    def get_only2():
-        pass
-
-    @READ
-    @api
-    def read_only():
-        pass
-
-    @WRITE
-    @api
-    def write_only():
-        pass
-
     map_module(__name__,'')
     # mount(urlconf=__name__) # mount all registered apis
     mount(only_me=True) # mount all registered apis
 
     
     # --- hey ---
-    wrp = _get_wrapper(hey)
+    wrp = (hey)
     assert wrp.url == None
     assert wrp.site_url == 'hey/'
 
-    assert _get_wrapper(index).site_url == '/'
+    assert (index).site_url == '/'
 
 
     # test auto-binding
-    url =_get_wrapper(t1).site_url
+    url =(t1).site_url
     assert url == 't1/'
 
     from django.test import Client
@@ -174,7 +181,7 @@ def test_site_url():
         assert r.result == 6
 
     # api-binding
-    url =_get_wrapper(hello).site_url
+    url =(hello).site_url
     assert url == 'hello(?:/a/(?P<a>[0-9]+))?/'
 
     response = client.get('/hello/')
@@ -227,3 +234,18 @@ def test_site_url():
     assert response.status_code == 200 # allowed
     response = client.patch('/write_only/')
     assert response.status_code == 200 # allowed
+
+    # django compatibility test
+    response = client.head('/get_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.get('/get_only/')
+    assert response.status_code == 200 # allowed
+
+    response = client.post('/get_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.put('/get_only/')
+    assert response.status_code == 405 # not allowed
+    response = client.patch('/get_only/')
+    assert response.status_code == 405 # not allowed
+
+    assert get_wrapper(get_only).site_url == 'get_only/'
