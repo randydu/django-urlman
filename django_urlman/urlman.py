@@ -15,14 +15,45 @@ from django.urls.converters import get_converters
 from . import converters
 
 _urls = []
-_module_maps = {} # mapping module to a url
+_module_maps = {} # module oaths
+_app_maps = {} # app paths
 
-def _geturl(prj, apps, pkg, module, fname, param_url, *, module_maps = None, app_url = None):
+def module_path(module, url):
+    """ maps module to a url """
+    if inspect.ismodule(module):
+        nm = module.__name__
+    elif isinstance(module, str):
+        try:
+            sys.modules[module]
+            nm = module
+        except KeyError:
+            raise ValueError(f"'{module}' is not a valid module'")
+    else:
+        raise ValueError("'module' must be either a module or a module name")
+
+    _module_maps[nm] = url
+
+def app_path(pkg, url):
+    """ maps app package to a url """
+    if isinstance(pkg, str):
+        nm = pkg
+    else:
+        nm = pkg.__name__
+
+    if not importlib.is_package(nm):
+        raise ValueError(f"'{nm}' must be a package")
+
+    _app_maps[nm] = url
+
+        
+
+
+def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps = None, app_url = None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
     app = pkg if pkg != '' else segs[0]
-    anchor = apps.get(app, app) if app != prj else ''
+    anchor = app_paths.get(app, _app_maps.get(app, app)) if app != prj else '' # project module always mounts at '/'
 
     if app_url is None:
         parts = segs[1:]
@@ -106,7 +137,7 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
     mroot = importlib.import_module(urlconf)
     prj = mroot.__package__
-
+    # apps: if apps are not imported previously, it can be imported here.
     # Loading apps will trigger registration of all app urls/apis.
     #
     # If an app does not appear explicitly in "apps" dictionary, it must be imported somewhere 
@@ -120,7 +151,7 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
 
         # import apps
         for app in apps:
-            if app != prj: # don't load project
+            if isinstance(app, str) and app != prj: # don't load project
                 m = importlib.import_module(app)
                 if hasattr(m, '__path__'):
                     import pkgutil
@@ -129,6 +160,7 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
                         if name not in ('setup'):
                             importlib.import_module('.'+name, package=app)
 
+    apps = { (k if isinstance(k, str) else k.__name__) : v for k,v in apps.items() }
     
     if only_me:
         mroot.urlpatterns = _get_all_paths(prj, apps)
@@ -414,17 +446,6 @@ def get_wrapper(f):
 
 
 
-
-def map_module(module, url):
-    """ maps module to a url """
-    if inspect.ismodule(module):
-        nm = module.__name__
-    elif isinstance(module, str):
-        nm = module
-    else:
-        raise ValueError("'module' must be either a module or a module name")
-
-    _module_maps[nm] = url
 
 
 class APIResult:

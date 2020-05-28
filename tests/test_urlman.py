@@ -1,4 +1,4 @@
-from django_urlman.urlman import _geturl, _APIWrapper, api, url, mount, map_module, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE, get_wrapper
+from django_urlman.urlman import _geturl, _APIWrapper, api, url, mount, module_path, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE, get_wrapper
 
 from django.views.decorators.http import require_http_methods, require_GET, require_POST, require_safe
 
@@ -126,7 +126,7 @@ def get_only():
     pass
 
 def test_site_url():
-    map_module(__name__,'')
+    module_path(__name__,'')
     # mount(urlconf=__name__) # mount all registered apis
     mount(only_me=True) # mount all registered apis
 
