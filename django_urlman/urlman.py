@@ -1,3 +1,5 @@
+""" URL management """
+
 import sys
 import importlib
 import inspect
@@ -6,7 +8,8 @@ import functools
 import json
 import warnings
 
-from django.urls import path, re_path
+import django.conf
+import django.urls
 from django.http.response import (HttpResponseBase, JsonResponse,
                                   HttpResponseNotAllowed, HttpResponseBadRequest)
 from django.core.serializers.json import DjangoJSONEncoder
@@ -23,17 +26,18 @@ _app_maps = {}  # app paths
 def module_path(module, path):
     """ maps module to a url """
     if inspect.ismodule(module):
-        nm = module.__name__
+        name = module.__name__
     elif isinstance(module, str):
         try:
-            sys.modules[module]
-            nm = module
+            # valid module?
+            _ = sys.modules[module]
+            name = module
         except KeyError:
             raise ValueError(f"'{module}' is not a valid module'")
     else:
         raise ValueError("'module' must be either a module or a module name")
 
-    _module_maps[nm] = path
+    _module_maps[name] = path
 
 
 def app_path(pkg, path):
@@ -41,11 +45,11 @@ def app_path(pkg, path):
     if isinstance(pkg, str):
         pkg = sys.modules[pkg]
 
-    nm = pkg.__name__
-    if not inspect.ismodule(nm) or not hasattr(pkg, '__path__'):
-        raise ValueError(f"'{nm}' must be a package")
+    name = pkg.__name__
+    if not inspect.ismodule(pkg) or not hasattr(pkg, '__path__'):
+        raise ValueError(f"'{name}' must be a package")
 
-    _app_maps[nm] = path
+    _app_maps[name] = path
 
 
 def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, app_url=None):
@@ -63,13 +67,13 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
             parts = module_maps[module].split('/')
         except:
             # searching partial matching
-            for i in sorted(module_maps, key=lambda x: len(x), reverse=True):
+            for i in sorted(module_maps, key=len, reverse=True):
                 if module.startswith(i):
                     leftover = module[len(i):]
                     if len(leftover) == 0:
                         parts = module_maps[i].split('/')
                         break
-                    elif leftover[0] == '.':
+                    if leftover[0] == '.':
                         parts = module_maps[i].split(
                             '/') + leftover[1:].split('.')
                         break
@@ -141,15 +145,15 @@ def _get_all_paths(prj: str, apps: dict):
     # (method-based dispatch) or raise error if duplication cannot be resolved.
 
     for x in _urls:
-        xpath = re_path if x.has_optional_param else path
+        xpath = django.urls.re_path if x.has_optional_param else django.urls.path
         paths.append(
             xpath(x.site_url, resolve_final_handler(x), name=x.url_name))
 
     return paths
 
 
-def mount(apps: dict = {}, *, urlconf=None, only_me=False):
-    import django.conf
+def mount(apps: dict = None, *, urlconf=None, only_me=False):
+    """ adds all registered api/url handlers """
 
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
     mroot = importlib.import_module(urlconf)
@@ -174,10 +178,13 @@ def mount(apps: dict = {}, *, urlconf=None, only_me=False):
                     import pkgutil
                     # package, loading all modules except special files (setup.py)
                     for _, name, _ in pkgutil.iter_modules(m.__path__):
-                        if name not in ('setup', 'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
+                        if name not in ('setup',
+                                        'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
                             importlib.import_module('.'+name, package=app)
 
-    apps = {(k if isinstance(k, str) else k.__name__)            : v for k, v in apps.items()}
+    apps = {} if apps is None else {
+        (k if isinstance(k, str) else k.__name__): v for k, v in apps.items()
+    }
 
     if only_me:
         mroot.urlpatterns = _get_all_paths(prj, apps)
@@ -207,13 +214,15 @@ class _MyJSONEncoder(DjangoJSONEncoder):
 class _APIWrapper:
     """ Request handler for wrapped api """
     # pylint: disable=too-many-instance-attributes
+
     def __init__(self, func, is_url=False, **kwargs):
         functools.update_wrapper(self, func, updated=())
 
         self.f = func
         self.func_name = kwargs.get('func_name', func.__name__ if hasattr(
             func, '__name__') else func.__class__.__name__)
-        self.url_name = kwargs.get('name', func.__module__ + '.' + self.func_name)
+        self.url_name = kwargs.get(
+            'name', func.__module__ + '.' + self.func_name)
         self.url = kwargs.get('url', None)  # app-wide url
         self.site_url = kwargs.get('site_url', None)  # site-wide url
         self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
@@ -239,7 +248,8 @@ class _APIWrapper:
         for i, name in enumerate(self.names):
             param = params[name]
 
-            if param.kind == inspect.Parameter.POSITIONAL_ONLY or param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            if (param.kind == inspect.Parameter.POSITIONAL_ONLY or
+                    param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD):
                 # call by position
                 assert len(self.pos_call) == i
                 self.pos_call.append(name)
@@ -263,7 +273,7 @@ class _APIWrapper:
                 self.defaults[name] = value
                 self.types[name] = type(value)
 
-    def _invoke(self, req, *args, **kwargs):
+    def _invoke(self, req, **kwargs):
         """ invoke wrapped function """
 
         if self.pos_call:
@@ -272,7 +282,6 @@ class _APIWrapper:
             for param in self.pos_call:
                 myargs.append(kwargs[param])
                 kwargs.pop(param)
-            myargs += args
 
             if self._is_url:
                 if kwargs:
@@ -286,9 +295,9 @@ class _APIWrapper:
                     result = self.f(*myargs)
         else:
             if self._is_url:
-                result = self.f(req, *args, **kwargs)
+                result = self.f(req, **kwargs)
             else:
-                result = self.f(*args, **kwargs)
+                result = self.f(**kwargs)
 
         return result
 
@@ -312,7 +321,10 @@ class _APIWrapper:
                         ))
         return value
 
-    def __call__(self, req, *args, **kwargs):
+    def __call__(self, req, **kwargs):
+        """ entry point of request handling called by diango.
+            * args is never used by diango when calling, all parameters are passed via keyword-values.
+        """
         try:
             # check the method permission
             if self.methods and req.method.upper() not in self.methods:
@@ -320,7 +332,8 @@ class _APIWrapper:
 
             if self.has_optional_param or self.param_autos:
                 # re_path() does not cope with type conversion so we have to do it manually
-                # non-empty param_autos means some params needed to be retrieved from other parts of request
+                # non-empty param_autos means some params needed to be retrieved
+                # from other parts of request
                 mykwargs = {**kwargs}
 
                 for name in self.names:
@@ -374,14 +387,14 @@ class _APIWrapper:
                         else:
                             mykwargs[name] = self._type_cast(name, value)
 
-                        if not found and not args:  # todo: check positional params in args
+                        if not found:  # param cannot be binded from inputs
                             return HttpResponseBadRequest('parameter (%s) not found' % name)
 
-                result = self._invoke(req, *args, **mykwargs)
+                result = self._invoke(req, **mykwargs)
 
             else:
                 # path() has done type conversion so just pass them directly to wrapped function
-                result = self._invoke(req, *args, **kwargs)
+                result = self._invoke(req, **kwargs)
 
             if isinstance(result, HttpResponseBase):
                 return result
@@ -420,10 +433,14 @@ class _APIWrapper:
 
                 if param in self.defaults:
                     # param is optional
-                    return f"(?:/(?P<{param}>{regex}))?" if param in self.pos_only else f"(?:/{param}/(?P<{param}>{regex}))?"
+                    if param in self.pos_only:
+                        return f"(?:/(?P<{param}>{regex}))?"
+                    return f"(?:/{param}/(?P<{param}>{regex}))?"
 
                 # param is not optional
-                return f"/(?P<{param}>{regex})" if param in self.pos_only else f"/{param}/(?P<{param}>{regex})"
+                if param in self.pos_only:
+                    return f"/(?P<{param}>{regex})"
+                return f"/{param}/(?P<{param}>{regex})"
 
         else:
             # no optional parameter, use path()
@@ -439,9 +456,10 @@ class _APIWrapper:
 
     @property
     def has_optional_param(self):
-        """ if the handler has any optional parameter? 
+        """ if the handler has any optional parameter?
 
-            For handler with optional parameter, we use re_path() instead of path() in the urlconf registry.
+            For handler with optional parameter, we use re_path() instead of path()
+            in the urlconf registry.
         """
         return self.defaults != {}
 
