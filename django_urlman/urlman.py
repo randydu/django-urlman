@@ -36,11 +36,10 @@ def module_path(module, url):
 def app_path(pkg, url):
     """ maps app package to a url """
     if isinstance(pkg, str):
-        nm = pkg
-    else:
-        nm = pkg.__name__
+        pkg = sys.modules[pkg]
 
-    if not importlib.is_package(nm):
+    nm = pkg.__name__
+    if not inspect.ismodule(nm) or not hasattr(pkg, '__path__'):
         raise ValueError(f"'{nm}' must be a package")
 
     _app_maps[nm] = url
