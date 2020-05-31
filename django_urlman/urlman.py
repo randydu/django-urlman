@@ -2,6 +2,7 @@
 
 import sys
 import importlib
+import pkgutil
 import inspect
 import traceback
 import functools
@@ -51,7 +52,7 @@ def app_path(pkg, path):
 
     _app_maps[name] = path
 
-
+# pylint: disable=too-many-arguments
 def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, app_url=None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
@@ -65,7 +66,7 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
         try:
             # exact match first
             parts = module_maps[module].split('/')
-        except:
+        except KeyError:
             # searching partial matching
             for i in sorted(module_maps, key=len, reverse=True):
                 if module.startswith(i):
@@ -88,66 +89,67 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
         parts = app_url.strip(' /').split('/')
 
     if anchor == '':
-        url = '/'.join(parts)
+        fpath = '/'.join(parts)
     else:
-        url = '/'.join([anchor.rstrip('/'), ] + parts)
+        fpath = '/'.join([anchor.rstrip('/'), ] + parts)
 
-    url += param_url
+    fpath += param_url
 
     # force trailing slash to avoid potential django route resolving issue.
-    if not url.endswith('/'):
-        url += '/'
+    if not fpath.endswith('/'):
+        fpath += '/'
     # no leading slash to make django system check happy.
-    if url != '/':
-        url = url.lstrip('/')
+    if fpath != '/':
+        fpath = fpath.lstrip('/')
 
-    return url
+    return fpath
 
 
 def _get_all_paths(prj: str, apps: dict):
     """ get all all registered urls """
 
-    def resolve_final_handler(x):
+    def resolve_final_handler(wrp):
         # the original handler might have been wrapped by extra decorators,
         # so we must figure out the final handler as the view
-        if not hasattr(x.f, '__name__'):
+        if not hasattr(wrp.f, '__name__'):
             # class-based view, once wrapped by external (non-django-urlman) decorator,
             # cannot be resolved, just returns the api-wrapper itself.
             warnings.warn(
-                f'class-based view {x.f.__class__.__name__} is not compatible'
+                f'class-based view {wrp.f.__class__.__name__} is not compatible'
                 'with external decorators.')
-            return x
+            return wrp
 
+        # SHOULD revise the conflicts with method-based dispatch
         try:
-            m = sys.modules[x.f.__module__]
-            y = getattr(m, x.f.__name__)
-            # if x is not y:
-            #    print(f'external decorator detected, {x.__name__}')
-            return y
-        except:
+            mod = sys.modules[wrp.f.__module__]
+            handler = getattr(mod, wrp.f.__name__)
+            # if wrp is not handler:
+            #    print(f'external decorator detected, {wrp.__name__}')
+            return handler
+        except (KeyError, AttributeError):
             warnings.warn(
-                f'view {x.f.__name__} cannot be resolved,  might be modified by'
+                f'view {wrp.f.__name__} cannot be resolved,  might be modified by'
                 'imcompatible external decorators, or defined in local scope.')
-            return x
+            return wrp
 
-    # resolve paths
-    paths = []
     # for pkg, module, api, handler in _urls:
-    for x in _urls:
-        if x.site_url is None:
+    for wrp in _urls:
+        if wrp.site_url is None:
             # site_url not specified, resolve it...
-            m = sys.modules[x.f.__module__]
-            x.site_url = _geturl(
-                prj, apps, m.__package__, x.f.__module__, x.func_name,
-                x.param_url, app_url=x.url)
+            mod = sys.modules[wrp.f.__module__]
+            wrp.site_url = _geturl(
+                prj, apps, mod.__package__, wrp.f.__module__, wrp.func_name,
+                wrp.param_url, app_url=wrp.url)
 
     # check duplicated site-url, merge the handlers if possible
     # (method-based dispatch) or raise error if duplication cannot be resolved.
 
-    for x in _urls:
-        xpath = django.urls.re_path if x.has_optional_param else django.urls.path
-        paths.append(
-            xpath(x.site_url, resolve_final_handler(x), name=x.url_name))
+    # resolve paths
+    paths = []
+
+    for wrp in _urls:
+        xpath = django.urls.re_path if wrp.has_optional_param else django.urls.path
+        paths.append(xpath(wrp.site_url, resolve_final_handler(wrp), name=wrp.url_name))
 
     return paths
 
@@ -173,11 +175,10 @@ def mount(apps: dict = None, *, urlconf=None, only_me=False):
         # import apps
         for app in apps:
             if isinstance(app, str) and app != prj:  # don't load project
-                m = importlib.import_module(app)
-                if hasattr(m, '__path__'):
-                    import pkgutil
+                mod = importlib.import_module(app)
+                if hasattr(mod, '__path__'):
                     # package, loading all modules except special files (setup.py)
-                    for _, name, _ in pkgutil.iter_modules(m.__path__):
+                    for _, name, _ in pkgutil.iter_modules(mod.__path__):
                         if name not in ('setup',
                                         'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
                             importlib.import_module('.'+name, package=app)
@@ -198,16 +199,16 @@ class _MyJSONEncoder(DjangoJSONEncoder):
     # include '_cls_' field indicating which class generates the data
     include_cls_id = False
 
-    def default(self, obj):
+    def default(self, o):
         try:
-            return super().default(obj)
-        except:
+            return super().default(o)
+        except TypeError:
             # To minimize serialized data size, only instantiated fields are saved and
             # the fields defined in class are ignored.
-            result = dict(obj.__dict__) if self.enable_all_fields else {
-                k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+            result = dict(o.__dict__) if self.enable_all_fields else {
+                k: v for k, v in o.__dict__.items() if not k.startswith('_')}
             if self.include_cls_id:
-                result['_cls_'] = type(obj).__name__
+                result['_cls_'] = type(o).__name__
             return result
 
 
@@ -323,7 +324,8 @@ class _APIWrapper:
 
     def __call__(self, req, **kwargs):
         """ entry point of request handling called by diango.
-            * args is never used by diango when calling, all parameters are passed via keyword-values.
+            * args is never used by diango when calling, all parameters are
+            passed via keyword-values.
         """
         try:
             # check the method permission
