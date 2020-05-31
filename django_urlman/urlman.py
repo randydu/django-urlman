@@ -88,10 +88,10 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
         # app-wide url is specified
         parts = app_url.strip(' /').split('/')
 
-    if anchor == '':
-        fpath = '/'.join(parts)
-    else:
-        fpath = '/'.join([anchor.rstrip('/'), ] + parts)
+    # full-path composition
+    fpath = '/'.join(parts) if anchor == '' else (
+        '/'.join([anchor.rstrip('/'), ] + parts)
+    )
 
     fpath += param_url
 
@@ -111,24 +111,24 @@ def _get_all_paths(prj: str, apps: dict):
     def resolve_final_handler(wrp):
         # the original handler might have been wrapped by extra decorators,
         # so we must figure out the final handler as the view
-        if not hasattr(wrp.f, '__name__'):
+        if not hasattr(wrp.func, '__name__'):
             # class-based view, once wrapped by external (non-django-urlman) decorator,
             # cannot be resolved, just returns the api-wrapper itself.
             warnings.warn(
-                f'class-based view {wrp.f.__class__.__name__} is not compatible'
+                f'class-based view {wrp.func.__class__.__name__} is not compatible'
                 'with external decorators.')
             return wrp
 
         # SHOULD revise the conflicts with method-based dispatch
         try:
-            mod = sys.modules[wrp.f.__module__]
-            handler = getattr(mod, wrp.f.__name__)
+            mod = sys.modules[wrp.func.__module__]
+            handler = getattr(mod, wrp.func.__name__)
             # if wrp is not handler:
             #    print(f'external decorator detected, {wrp.__name__}')
             return handler
         except (KeyError, AttributeError):
             warnings.warn(
-                f'view {wrp.f.__name__} cannot be resolved,  might be modified by'
+                f'view {wrp.func.__name__} cannot be resolved,  might be modified by'
                 'imcompatible external decorators, or defined in local scope.')
             return wrp
 
@@ -136,9 +136,9 @@ def _get_all_paths(prj: str, apps: dict):
     for wrp in _urls:
         if wrp.site_url is None:
             # site_url not specified, resolve it...
-            mod = sys.modules[wrp.f.__module__]
+            mod = sys.modules[wrp.func.__module__]
             wrp.site_url = _geturl(
-                prj, apps, mod.__package__, wrp.f.__module__, wrp.func_name,
+                prj, apps, mod.__package__, wrp.func.__module__, wrp.func_name,
                 wrp.param_url, app_url=wrp.url)
 
     # check duplicated site-url, merge the handlers if possible
@@ -173,15 +173,19 @@ def mount(apps: dict = None, *, urlconf=None, only_me=False):
             raise ValueError("apps must be a dictionary!")
 
         # import apps
+        def load_package(app, path):
+            # package, loading all modules except special files (setup.py)
+            for _, name, _ in pkgutil.iter_modules(path):
+                if name not in ('setup',
+                                'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
+                    importlib.import_module('.'+name, package=app)
+
         for app in apps:
-            if isinstance(app, str) and app != prj:  # don't load project
+            if isinstance(app, str) and app != prj:  # don't load project itself
                 mod = importlib.import_module(app)
                 if hasattr(mod, '__path__'):
-                    # package, loading all modules except special files (setup.py)
-                    for _, name, _ in pkgutil.iter_modules(mod.__path__):
-                        if name not in ('setup',
-                                        'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
-                            importlib.import_module('.'+name, package=app)
+                    load_package(app, mod.__path__)
+
 
     apps = {} if apps is None else {
         (k if isinstance(k, str) else k.__name__): v for k, v in apps.items()
@@ -219,7 +223,7 @@ class _APIWrapper:
     def __init__(self, func, is_url=False, **kwargs):
         functools.update_wrapper(self, func, updated=())
 
-        self.f = func
+        self.func = func
         self.func_name = kwargs.get('func_name', func.__name__ if hasattr(
             func, '__name__') else func.__class__.__name__)
         self.url_name = kwargs.get(
@@ -286,19 +290,19 @@ class _APIWrapper:
 
             if self._is_url:
                 if kwargs:
-                    result = self.f(req, *myargs, **kwargs)
+                    result = self.func(req, *myargs, **kwargs)
                 else:
-                    result = self.f(req, *myargs)
+                    result = self.func(req, *myargs)
             else:
                 if kwargs:
-                    result = self.f(*myargs, **kwargs)
+                    result = self.func(*myargs, **kwargs)
                 else:
-                    result = self.f(*myargs)
+                    result = self.func(*myargs)
         else:
             if self._is_url:
-                result = self.f(req, **kwargs)
+                result = self.func(req, **kwargs)
             else:
-                result = self.f(**kwargs)
+                result = self.func(**kwargs)
 
         return result
 
