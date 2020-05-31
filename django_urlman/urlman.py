@@ -7,18 +7,20 @@ import json
 import warnings
 
 from django.urls import path, re_path
-from django.http.response import HttpResponseBase, JsonResponse, HttpResponseNotAllowed, HttpResponseBadRequest
+from django.http.response import (HttpResponseBase, JsonResponse,
+                                  HttpResponseNotAllowed, HttpResponseBadRequest)
 from django.core.serializers.json import DjangoJSONEncoder
 from django.urls.converters import get_converters
 
 # make sure built-in converters are registered.
-from . import converters
+from . import converters  # pylint: disable=unused-import
 
 _urls = []
-_module_maps = {} # module oaths
-_app_maps = {} # app paths
+_module_maps = {}  # module oaths
+_app_maps = {}  # app paths
 
-def module_path(module, url):
+
+def module_path(module, path):
     """ maps module to a url """
     if inspect.ismodule(module):
         nm = module.__name__
@@ -31,9 +33,10 @@ def module_path(module, url):
     else:
         raise ValueError("'module' must be either a module or a module name")
 
-    _module_maps[nm] = url
+    _module_maps[nm] = path
 
-def app_path(pkg, url):
+
+def app_path(pkg, path):
     """ maps app package to a url """
     if isinstance(pkg, str):
         pkg = sys.modules[pkg]
@@ -42,17 +45,16 @@ def app_path(pkg, url):
     if not inspect.ismodule(nm) or not hasattr(pkg, '__path__'):
         raise ValueError(f"'{nm}' must be a package")
 
-    _app_maps[nm] = url
-
-        
+    _app_maps[nm] = path
 
 
-def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps = None, app_url = None):
+def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, app_url=None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
     app = pkg if pkg != '' else segs[0]
-    anchor = app_paths.get(app, _app_maps.get(app, app)) if app != prj else '' # project module always mounts at '/'
+    # project module always mounts at '/'
+    anchor = app_paths.get(app, _app_maps.get(app, app)) if app != prj else ''
 
     if app_url is None:
         parts = segs[1:]
@@ -68,9 +70,10 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps = None
                         parts = module_maps[i].split('/')
                         break
                     elif leftover[0] == '.':
-                        parts = module_maps[i].split('/') + leftover[1:].split('.')
+                        parts = module_maps[i].split(
+                            '/') + leftover[1:].split('.')
                         break
-        
+
         while parts and parts[0] == '':
             parts = parts[1:]
 
@@ -83,58 +86,69 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps = None
     if anchor == '':
         url = '/'.join(parts)
     else:
-        url = '/'.join([anchor.rstrip('/'),] + parts)
-    
+        url = '/'.join([anchor.rstrip('/'), ] + parts)
+
     url += param_url
-        
+
     # force trailing slash to avoid potential django route resolving issue.
     if not url.endswith('/'):
-        url+='/'
+        url += '/'
     # no leading slash to make django system check happy.
     if url != '/':
-        url = url.lstrip('/') 
-    
+        url = url.lstrip('/')
+
     return url
 
 
-
-def _get_all_paths(prj:str, apps: dict):
+def _get_all_paths(prj: str, apps: dict):
     """ get all all registered urls """
-    
+
     def resolve_final_handler(x):
         # the original handler might have been wrapped by extra decorators,
-        # so we must figure out the final handler as the view 
+        # so we must figure out the final handler as the view
         if not hasattr(x.f, '__name__'):
-            # class-based view, once wrapped by external (non-django-urlman) decorator, cannot be resolved.
-            # just returns the api-wrapper itself.
-            warnings.warn(f'class-based view {x.f.__class__.__name__} is not compatible with external decorators.')
+            # class-based view, once wrapped by external (non-django-urlman) decorator,
+            # cannot be resolved, just returns the api-wrapper itself.
+            warnings.warn(
+                f'class-based view {x.f.__class__.__name__} is not compatible'
+                'with external decorators.')
             return x
-        
+
         try:
             m = sys.modules[x.f.__module__]
             y = getattr(m, x.f.__name__)
-            #if x is not y:
+            # if x is not y:
             #    print(f'external decorator detected, {x.__name__}')
             return y
         except:
-            warnings.warn(f'view {x.f.__name__} cannot be resolved,  might be modified by imcompatible external decorators, or defined in local scope.')
+            warnings.warn(
+                f'view {x.f.__name__} cannot be resolved,  might be modified by'
+                'imcompatible external decorators, or defined in local scope.')
             return x
 
     # resolve paths
     paths = []
-    #for pkg, module, api, handler in _urls:
+    # for pkg, module, api, handler in _urls:
     for x in _urls:
         if x.site_url is None:
-            # site_url not specified, resolve it... 
+            # site_url not specified, resolve it...
             m = sys.modules[x.f.__module__]
-            x.site_url = _geturl(prj, apps, m.__package__, x.f.__module__, x.func_name, x.param_url, app_url=x.url)
-        
+            x.site_url = _geturl(
+                prj, apps, m.__package__, x.f.__module__, x.func_name,
+                x.param_url, app_url=x.url)
+
+    # check duplicated site-url, merge the handlers if possible
+    # (method-based dispatch) or raise error if duplication cannot be resolved.
+
+    for x in _urls:
         xpath = re_path if x.has_optional_param else path
-        paths.append(xpath(x.site_url, resolve_final_handler(x), name = x.url_name))
+        paths.append(
+            xpath(x.site_url, resolve_final_handler(x), name=x.url_name))
 
     return paths
 
-def mount(apps: dict = {}, *, urlconf = None, only_me = False):
+
+def mount(apps: dict = {}, *, urlconf=None, only_me=False):
     import django.conf
 
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
@@ -143,7 +157,7 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
     # apps: if apps are not imported previously, it can be imported here.
     # Loading apps will trigger registration of all app urls/apis.
     #
-    # If an app does not appear explicitly in "apps" dictionary, it must be imported somewhere 
+    # If an app does not appear explicitly in "apps" dictionary, it must be imported somewhere
     # in order to register its apis.
     #
     # When app is in "apps" dictionary, it can specify the mounting point in the site / project,
@@ -154,17 +168,17 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
 
         # import apps
         for app in apps:
-            if isinstance(app, str) and app != prj: # don't load project
+            if isinstance(app, str) and app != prj:  # don't load project
                 m = importlib.import_module(app)
                 if hasattr(m, '__path__'):
                     import pkgutil
                     # package, loading all modules except special files (setup.py)
                     for _, name, _ in pkgutil.iter_modules(m.__path__):
-                        if name not in ('setup'):
+                        if name not in ('setup', 'manage', 'migrations', 'settings', 'asgi', 'wsgi'):
                             importlib.import_module('.'+name, package=app)
 
-    apps = { (k if isinstance(k, str) else k.__name__) : v for k,v in apps.items() }
-    
+    apps = {(k if isinstance(k, str) else k.__name__)            : v for k, v in apps.items()}
+
     if only_me:
         mroot.urlpatterns = _get_all_paths(prj, apps)
     else:
@@ -172,118 +186,131 @@ def mount(apps: dict = {}, *, urlconf = None, only_me = False):
 
 
 class _MyJSONEncoder(DjangoJSONEncoder):
-    enable_all_fields = False # include private fields?
-    include_cls_id = False # include '_cls_' field indicating which class generates the data
+    enable_all_fields = False  # include private fields?
+
+    # include '_cls_' field indicating which class generates the data
+    include_cls_id = False
 
     def default(self, obj):
         try:
             return super().default(obj)
         except:
-            # To minimize serialized data size, only instantiated fields are saved and the fields defined in class are ignored.
-            r = dict(obj.__dict__) if self.enable_all_fields else { k:v for k,v in obj.__dict__.items() if not k.startswith('_') }
+            # To minimize serialized data size, only instantiated fields are saved and
+            # the fields defined in class are ignored.
+            result = dict(obj.__dict__) if self.enable_all_fields else {
+                k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
             if self.include_cls_id:
-                r['_cls_'] = type(obj).__name__
-            return r
+                result['_cls_'] = type(obj).__name__
+            return result
 
-class _APIWrapper(object):
-    def __init__(self, f, is_url = False, **kwargs):
-        functools.update_wrapper(self, f, updated = ())
 
-        self.f = f
-        self.func_name = kwargs.get('func_name', f.__name__ if hasattr(f, '__name__') else f.__class__.__name__)
-        self.url_name = kwargs.get('name', f.__module__ + '.' + self.func_name)
-        self.url = kwargs.get('url', None) # app-wide url
-        self.site_url = kwargs.get('site_url', None) # site-wide url
+class _APIWrapper:
+    """ Request handler for wrapped api """
+    # pylint: disable=too-many-instance-attributes
+    def __init__(self, func, is_url=False, **kwargs):
+        functools.update_wrapper(self, func, updated=())
+
+        self.f = func
+        self.func_name = kwargs.get('func_name', func.__name__ if hasattr(
+            func, '__name__') else func.__class__.__name__)
+        self.url_name = kwargs.get('name', func.__module__ + '.' + self.func_name)
+        self.url = kwargs.get('url', None)  # app-wide url
+        self.site_url = kwargs.get('site_url', None)  # site-wide url
         self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
 
         self._is_url = is_url
 
-        self.defaults = {} # param's default value
+        self.defaults = {}  # param's default value
         self.types = {}    # param's type annotation
         self.pos_call = []  # pass param by position
         self.pos_only = []  # position only param
-        self.param_autos = kwargs.get('param_autos', ()) # param should be retrieved from body, query
+        # param should be retrieved from body, query
+        self.param_autos = kwargs.get('param_autos', ())
 
-        params = inspect.signature(self.f).parameters
+        params = inspect.signature(func).parameters
 
-        param_types = kwargs.get('param_types',{})
-        
+        param_types = kwargs.get('param_types', {})
+
         self.names = [*params]
         if is_url:
             # skip first parameter (request)
             self.names = self.names[1:]
 
-        for i, x in enumerate(self.names):
-            param = params[x]
+        for i, name in enumerate(self.names):
+            param = params[name]
 
             if param.kind == inspect.Parameter.POSITIONAL_ONLY or param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD:
                 # call by position
                 assert len(self.pos_call) == i
-                self.pos_call.append(x)
+                self.pos_call.append(name)
 
                 if param.kind == inspect.Parameter.POSITIONAL_ONLY:
-                    self.pos_only.append(x)
+                    self.pos_only.append(name)
 
-            v = param.default
+            value = param.default
 
-            if v == inspect._empty:
+            if value == inspect._empty:
                 # no default value
                 cls = param.annotation
                 if cls != inspect._empty:
-                    self.types[x] = cls
+                    self.types[name] = cls
                 else:
                     # decorator provided type annotation via 'param_types'
-                    if x in param_types:
-                        self.types[x] = param_types[x]
+                    if name in param_types:
+                        self.types[name] = param_types[name]
             else:
                 # has default value
-                self.defaults[x] = v
-                self.types[x] = type(v)
+                self.defaults[name] = value
+                self.types[name] = type(value)
 
     def _invoke(self, req, *args, **kwargs):
+        """ invoke wrapped function """
+
         if self.pos_call:
-            # extract call_by_pos params 
+            # extract call_by_pos params
             myargs = []
-            for x in self.pos_call:
-                myargs.append(kwargs[x])
-                kwargs.pop(x)
+            for param in self.pos_call:
+                myargs.append(kwargs[param])
+                kwargs.pop(param)
             myargs += args
 
             if self._is_url:
                 if kwargs:
-                    r = self.f(req, *myargs, **kwargs)
+                    result = self.f(req, *myargs, **kwargs)
                 else:
-                    r = self.f(req, *myargs)
+                    result = self.f(req, *myargs)
             else:
                 if kwargs:
-                    r = self.f(*myargs, **kwargs)
+                    result = self.f(*myargs, **kwargs)
                 else:
-                    r = self.f(*myargs)
+                    result = self.f(*myargs)
         else:
             if self._is_url:
-                r = self.f(req, *args, **kwargs)
+                result = self.f(req, *args, **kwargs)
             else:
-                r = self.f(*args, **kwargs)
-        
-        return r
+                result = self.f(*args, **kwargs)
 
-    def _type_cast(self, x,v):
-        # cast param x to registered type
-        if x in self.types:
-            typ = self.types[x]
+        return result
 
-            if not isinstance(v, typ):
+    def _type_cast(self, name, value):
+        ''' cast param value to registered type '''
+        if name in self.types:
+            typ = self.types[name]
+
+            if not isinstance(value, typ):
                 try:
-                    v = get_converters()[typ.__name__].to_python(v)
+                    value = get_converters()[typ.__name__].to_python(value)
                 except KeyError:
                     # no matched converter, fall back to type constructor
                     try:
-                        v = typ(v)
-                    except:
-                        pass
-        return v
-
-
+                        value = typ(value)
+                    except (ValueError, TypeError) as ex:
+                        warnings.warn((
+                            f"exception {ex} caught when type casting parameter "
+                            f"{name} from '{value}' to type {typ.__name__}, "
+                            f"type cast is skipped."
+                        ))
+        return value
 
     def __call__(self, req, *args, **kwargs):
         try:
@@ -294,205 +321,227 @@ class _APIWrapper(object):
             if self.has_optional_param or self.param_autos:
                 # re_path() does not cope with type conversion so we have to do it manually
                 # non-empty param_autos means some params needed to be retrieved from other parts of request
-                mykwargs = { **kwargs }
+                mykwargs = {**kwargs}
 
-                for x in self.names:
-                    if x in mykwargs:
+                for name in self.names:
+                    if name in mykwargs:
                         # param provided by caller
-                        mykwargs[x] = self._type_cast(x, mykwargs[x])
+                        mykwargs[name] = self._type_cast(name, mykwargs[name])
                     else:
                         # param not provided by caller
                         found = False
-                        if x in self.param_autos:
+                        if name in self.param_autos:
                             if req.content_type == 'application/json':
                                 content = json.loads(req.body)
-                                if x in content:
-                                    v = content[x]
+                                if name in content:
+                                    value = content[name]
                                     found = True
                             else:
                                 # search in POST which is parsed from body.
                                 try:
-                                    v = req.POST[x]
+                                    value = req.POST[name]
                                     found = True
-                                except:
+                                except KeyError:
                                     pass
 
                                 # search in GET which is parsed from query-string.
                                 try:
-                                    v = req.GET[x]
+                                    value = req.GET[name]
                                     found = True
-                                except:
+                                except KeyError:
                                     pass
 
                                 # search in cookie
                                 try:
-                                    # v = req.get_signed_cookie(x)
-                                    v = req.COOKIES[x]
+                                    # value = req.get_signed_cookie(x)
+                                    value = req.COOKIES[name]
                                     found = True
-                                except:
+                                except KeyError:
                                     pass
 
                                 # search session
                                 if hasattr(req, 'session'):
                                     try:
-                                        v = req.session[x]
+                                        value = req.session[name]
                                         found = True
-                                    except:
+                                    except KeyError:
                                         pass
 
                         if not found:
-                            if x in self.defaults:
-                                mykwargs[x] = self.defaults[x]
+                            if name in self.defaults:
+                                mykwargs[name] = self.defaults[name]
                                 found = True
                         else:
-                            mykwargs[x] = self._type_cast(x, v)
+                            mykwargs[name] = self._type_cast(name, value)
 
-                        if not found and not args: # todo: check positional params in args
-                            return HttpResponseBadRequest('parameter (%s) not found' % x)
+                        if not found and not args:  # todo: check positional params in args
+                            return HttpResponseBadRequest('parameter (%s) not found' % name)
 
-                r = self._invoke(req, *args, **mykwargs)
+                result = self._invoke(req, *args, **mykwargs)
 
             else:
                 # path() has done type conversion so just pass them directly to wrapped function
-                r = self._invoke(req, *args, **kwargs)
+                result = self._invoke(req, *args, **kwargs)
 
-            if isinstance(r, HttpResponseBase):
-                return r
+            if isinstance(result, HttpResponseBase):
+                return result
 
             return JsonResponse({
-                    'error': None,
-                    'result': r, 
-                }, safe = False, encoder = _MyJSONEncoder)
-        except:
-            ex = sys.exc_info()
+                'error': None,
+                'result': result,
+            }, safe=False, encoder=_MyJSONEncoder)
+        except Exception as ex:  # pylint: disable=broad-except
+            ex_info = sys.exc_info()
             return JsonResponse({
-                    'error': ex[0].__name__,
-                    'stack': traceback.format_exception(*ex),
+                'error': repr(ex),
+                'stack': traceback.format_exception(*ex_info),
 
-                    'result': None, 
-                }, safe = False, encoder = _MyJSONEncoder)
-
+                'result': None,
+            }, safe=False, encoder=_MyJSONEncoder)
 
     @property
     def param_url(self):
-        # param-based url.
-        # '' if no param; it has the leading slash if needed, no trailing slash. 
+        """ param-based url.
+
+            '' if no param; it has the leading slash if needed, no trailing slash.
+        """
         if self.defaults:
             # has optional parameter, use re_path()
-            def get_one_url(x):
+            def get_one_url(param):
                 regex = '[^/]+'
-                
-                if x in self.types:
-                    typ = self.types[x].__name__ 
+
+                if param in self.types:
+                    typ = self.types[param].__name__
                     try:
                         regex = get_converters()[typ].regex
                     except KeyError:
-                        # unregistered converter 
+                        # unregistered converter
                         pass
 
-                if x in self.defaults:
-                    # x is optional
-                    return f"(?:/(?P<{x}>{regex}))?" if x in self.pos_only else f"(?:/{x}/(?P<{x}>{regex}))?"
-                else:
-                    # x is not optional
-                    return f"/(?P<{x}>{regex})" if x in self.pos_only else f"/{x}/(?P<{x}>{regex})"
+                if param in self.defaults:
+                    # param is optional
+                    return f"(?:/(?P<{param}>{regex}))?" if param in self.pos_only else f"(?:/{param}/(?P<{param}>{regex}))?"
+
+                # param is not optional
+                return f"/(?P<{param}>{regex})" if param in self.pos_only else f"/{param}/(?P<{param}>{regex})"
 
         else:
             # no optional parameter, use path()
-            def get_one_url(x):
+            def get_one_url(param):
                 try:
-                    typ = self.types[x].__name__ + ':'
+                    typ = self.types[param].__name__ + ':'
                 except KeyError:
                     typ = ''
 
-                return f"/<{typ}{x}>" if x in self.pos_only else f"/{x}/<{typ}{x}>"
+                return f"/<{typ}{param}>" if param in self.pos_only else f"/{param}/<{typ}{param}>"
 
-        return ''.join([ get_one_url(x) for x in self.names if x not in self.param_autos ])
+        return ''.join([get_one_url(x) for x in self.names if x not in self.param_autos])
 
     @property
     def has_optional_param(self):
+        """ if the handler has any optional parameter? 
+
+            For handler with optional parameter, we use re_path() instead of path() in the urlconf registry.
+        """
         return self.defaults != {}
 
-def _wrap(f, is_url, **kwargs):
-    wrp = _APIWrapper(f, is_url, **kwargs)
+
+def _wrap(func, is_url, **kwargs):
+    wrp = _APIWrapper(func, is_url, **kwargs)
     _urls.append(wrp)
     return wrp
 
 
-def _api(f = None, is_url = False, **kwargs):
-    if callable(f):
+def _api(func=None, is_url=False, **kwargs):
+    if callable(func):
         # decorator without parameters, or called directly with api(f)
-        return _wrap(f, is_url, **kwargs)
-    else:
-        # decorator with parameters
-        def wrap(func):
-            return _wrap(func, is_url, **kwargs)
-        return wrap
+        return _wrap(func, is_url, **kwargs)
 
-api = functools.partial(_api, is_url = False)
-url = functools.partial(_api, is_url = True)
+    # decorator with parameters
+    def wrap(func):
+        return _wrap(func, is_url, **kwargs)
+    return wrap
 
 
-def get_wrapper(f):
+api = functools.partial(_api, is_url=False)
+url = functools.partial(_api, is_url=True)
+
+
+def get_wrapper(func):
     ''' [INTERNAL] get the APIWrapper instance from wrapped function '''
-    if isinstance(f, _APIWrapper):
-        return f
-    
-    name = f.__name__ if hasattr(f, '__name__') else f.__class__.__name__
-    module = f.__module__
+    if isinstance(func, _APIWrapper):
+        return func
 
-    for x in _urls:
-        if x.__module__ == module and x.__name__ == name:
-            return x 
-    
-    raise ValueError('wrapper cannot be resolved, is it wrapped with @api/@url before?')
+    name = func.__name__ if hasattr(
+        func, '__name__') else func.__class__.__name__
+    module = func.__module__
 
+    for wrp in _urls:
+        if wrp.__module__ == module and wrp.__name__ == name:
+            return wrp
 
-
+    raise ValueError(
+        'wrapper cannot be resolved, is it wrapped with @api/@url before?')
 
 
 class APIResult:
     '''utility to retrieve result of api from response'''
+
     def __init__(self, response):
-        self.r = json.loads(response.content)
+        self.status_code = response.status_code
+        self._r = json.loads(response.content)
+
     @property
     def error(self):
-        return self.r['error']
+        ''' error information '''
+        return self._r['error']
+
     @property
     def stack(self):
-        return self.r.get('stack', None)
+        ''' exception stack if error != null '''
+        return self._r.get('stack', None)
+
     @property
     def result(self):
-        return self.r['result']
+        ''' api result on success, can be basic type (str, int, float,...) or dict, list.
+            result == null on error
+        '''
+        return self._r['result']
 
 # method decorators
 # ref: @api(methods=['GET','HEAD'])
-    '''@get : only support method GET
-    
-        @GET
-        @api
-        def foo():pass
+#
+#
+#    @get : only support method GET
+#
+#    @GET
+#    @api
+#    def foo():pass
+#
+#    @GET
+#    @HEAD
+#    @api
+#    def bar():pass
+#
+#    is equal to:
+#
+#    @api(methods = ['GET', 'HEAD'])
+#    def bar():pass
+#
 
-        @GET
-        @HEAD
-        @api
-        def bar():pass
 
-        is equal to:
-
-        @api(methods = ['GET', 'HEAD'])
-        def bar():pass
-    '''
-
-def _add_method(f, *, method):
-    if not isinstance(f, _APIWrapper):
-        raise ValueError('method decorator should be applied on top of @api/@url!')
+def _add_method(func, *, method):
+    if not isinstance(func, _APIWrapper):
+        raise ValueError(
+            'method decorator should be applied on top of @api/@url!')
 
     if isinstance(method, str):
-        f.methods = { *f.methods, method}
+        func.methods = {*func.methods, method}
     else:
-        f.methods = { *f.methods, *method}
-    return f
+        func.methods = {*func.methods, *method}
+
+    return func
+
 
 GET = functools.partial(_add_method, method='GET')
 POST = functools.partial(_add_method, method='POST')
@@ -505,5 +554,16 @@ OPTIONS = functools.partial(_add_method, method='OPTIONS')
 TRACE = functools.partial(_add_method, method='TRACE')
 
 # macros
-READ = functools.partial(_add_method, method = ('GET', 'HEAD'))
-WRITE = functools.partial(_add_method, method = ('POST', 'PUT', 'PATCH'))
+READ = functools.partial(_add_method, method=('GET', 'HEAD'))
+WRITE = functools.partial(_add_method, method=('POST', 'PUT', 'PATCH'))
+
+# debug helpers
+
+
+def _dump_urls():
+    """ dump internal urls (internal) """
+
+    print('*** Dump of all registered urls ***\n')
+
+    for i, wrp in enumerate(_urls):
+        print(f'[{i}] {wrp.site_url}\n')

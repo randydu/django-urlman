@@ -54,7 +54,7 @@ def test_api_param_url():
     assert (pos_only_and_optional2).param_url == '/(?P<a>[0-9]+)(?:/(?P<b>[0-9]+))?'
 
     @api
-    def pos_only_and_optional1(a:int=0,/):pass
+    def pos_only_and_optional3(a:int=0,/):pass
     assert (pos_only_and_optional1).param_url == '(?:/(?P<a>[0-9]+))?'
 
 
@@ -124,6 +124,22 @@ def write_only():
 @api
 def get_only():
     pass
+
+# GET/POST dispatcb
+_name = 'Ruby'
+@GET
+@api
+def name():
+    global _name
+    return _name
+
+@PUT
+@api
+def name(name,/): # pylint: disable=function-redefined
+    global _name
+    old_name, _name = _name, name
+    return old_name
+
 
 def test_site_url():
     module_path(__name__,'')
@@ -249,3 +265,16 @@ def test_site_url():
     assert response.status_code == 405 # not allowed
 
     assert get_wrapper(get_only).site_url == 'get_only/'
+
+    # test method-based dispatch
+    response = client.get('/name/')
+    assert response.status_code == 200
+    assert response.json()['result'] == 'Ruby'
+
+    response = client.put('/name/Janet/')
+    assert response.status_code == 200
+    assert response.json()['result'] == 'Ruby' # last name
+
+    response = client.get('/name/')
+    assert response.status_code == 200
+    assert response.json()['result'] == 'Janet'

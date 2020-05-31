@@ -1,31 +1,43 @@
-
-# Extra converters 
+""" Extra converters """
 
 import django.urls
 
+
 class FloatConverter:
+    """ float type converter """
     regex = '[+-]?([0-9]*[.])?[0-9]+'
 
-    def to_python(self, value):
+    @staticmethod
+    def to_python(value):
+        """ string to float """
         return float(value)
 
-    def to_url(self, value):
+    @staticmethod
+    def to_url(value):
+        """ float to url string """
         return str(value)
 
+
 class BoolConverter:
+    """ bool type converter """
     regex = '(?i)(true|false)'
 
-    def to_python(self, value):
-        s = value.lower()
-        if s in ('true', '1'):
+    @staticmethod
+    def to_python(value):
+        """ string to boolean """
+        lstr = value.lower()
+        if lstr in ('true', '1'):
             return True
-        elif s in ('false', '0'):
+        if lstr in ('false', '0'):
             return False
-        
+
         raise ValueError(f'value ({value}) cannot be converted to bool')
 
-    def to_url(self, value):
+    @staticmethod
+    def to_url(value):
+        """ boolean to string """
         return 'true' if value else 'false'
+
 
 django.urls.register_converter(FloatConverter, 'float')
 django.urls.register_converter(BoolConverter, 'bool')

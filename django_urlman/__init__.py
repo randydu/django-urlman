@@ -6,13 +6,6 @@ __version__ = "0.3.0"
 __license__ = "MIT"
 __author__ = "Randy Du <randydu@gmail.com>"
 
-from .urlman import mount, url, api, app_path, module_path, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, CONNECT, OPTIONS, TRACE, READ, WRITE, get_wrapper
-
-def _dump_urls():
-    """ dump internal urls (internal) """
-    from .urlman import _urls
-
-    print('*** Dump of all registered urls ***\n')
-    
-    for i, url in enumerate(_urls):
-        print(f'[{i}] {url.site_url}\n')
+from .urlman import (mount, url, api, app_path, module_path, APIResult,
+                     HEAD, GET, POST, PUT, PATCH, DELETE, CONNECT, OPTIONS,
+                     TRACE, READ, WRITE, get_wrapper, _dump_urls)
