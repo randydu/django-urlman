@@ -91,6 +91,10 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps = None
     # force trailing slash to avoid potential django route resolving issue.
     if not url.endswith('/'):
         url+='/'
+    # no leading slash to make django system check happy.
+    if url != '/':
+        url = url.lstrip('/') 
+    
     return url
 
 
