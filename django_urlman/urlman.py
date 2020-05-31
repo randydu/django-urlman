@@ -326,6 +326,59 @@ class _APIWrapper:
                         ))
         return value
 
+    def _try_resolve_param(self, req, name):
+        ''' try resolving parameter values from various sources
+            return: (found, value), value make sense only if found == True
+        '''
+        found = False
+        value = None
+
+        if name in self.param_autos:
+            if req.content_type == 'application/json':
+                content = json.loads(req.body)
+                if name in content:
+                    value = content[name]
+                    found = True
+            else:
+                # search in POST which is parsed from body.
+                try:
+                    value = req.POST[name]
+                    found = True
+                except KeyError:
+                    pass
+
+                # search in GET which is parsed from query-string.
+                try:
+                    value = req.GET[name]
+                    found = True
+                except KeyError:
+                    pass
+
+                # search in cookie
+                try:
+                    # value = req.get_signed_cookie(x)
+                    value = req.COOKIES[name]
+                    found = True
+                except KeyError:
+                    pass
+
+                # search session
+                if hasattr(req, 'session'):
+                    try:
+                        value = req.session[name]
+                        found = True
+                    except KeyError:
+                        pass
+
+        if not found:
+            if name in self.defaults:
+                value = self.defaults[name]
+                found = True
+        else:
+            value = self._type_cast(name, value)
+
+        return (found, value)
+
     def __call__(self, req, **kwargs):
         """ entry point of request handling called by diango.
             * args is never used by diango when calling, all parameters are
@@ -348,53 +401,12 @@ class _APIWrapper:
                         mykwargs[name] = self._type_cast(name, mykwargs[name])
                     else:
                         # param not provided by caller
-                        found = False
-                        if name in self.param_autos:
-                            if req.content_type == 'application/json':
-                                content = json.loads(req.body)
-                                if name in content:
-                                    value = content[name]
-                                    found = True
-                            else:
-                                # search in POST which is parsed from body.
-                                try:
-                                    value = req.POST[name]
-                                    found = True
-                                except KeyError:
-                                    pass
-
-                                # search in GET which is parsed from query-string.
-                                try:
-                                    value = req.GET[name]
-                                    found = True
-                                except KeyError:
-                                    pass
-
-                                # search in cookie
-                                try:
-                                    # value = req.get_signed_cookie(x)
-                                    value = req.COOKIES[name]
-                                    found = True
-                                except KeyError:
-                                    pass
-
-                                # search session
-                                if hasattr(req, 'session'):
-                                    try:
-                                        value = req.session[name]
-                                        found = True
-                                    except KeyError:
-                                        pass
-
-                        if not found:
-                            if name in self.defaults:
-                                mykwargs[name] = self.defaults[name]
-                                found = True
+                        found, value = self._try_resolve_param(req, name)
+                        if found:
+                            mykwargs[name] = value
                         else:
-                            mykwargs[name] = self._type_cast(name, value)
-
-                        if not found:  # param cannot be binded from inputs
-                            return HttpResponseBadRequest('parameter (%s) not found' % name)
+                            # param cannot be binded from inputs
+                            return HttpResponseBadRequest(f'parameter ({name}) cannot be resolved')
 
                 result = self._invoke(req, **mykwargs)
 
