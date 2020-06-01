@@ -1,9 +1,11 @@
 from django_urlman.urlman import _geturl, _APIWrapper, mount, module_path, APIResult, get_wrapper
 from django_urlman.decorators import api, url, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE
+from django_urlman.marker import mark
 
 from django.views.decorators.http import require_http_methods, require_GET, require_POST, require_safe
 
 from . import settings
+
 
 
 def test_geturl():
@@ -56,23 +58,23 @@ def test_api_param_url():
 
     @api
     def pos_only_and_optional3(a:int=0,/):pass
-    assert (pos_only_and_optional1).param_url == '(?:/(?P<a>[0-9]+))?'
+    assert (pos_only_and_optional3).param_url == '(?:/(?P<a>[0-9]+))?'
 
 
 def test_names():
     # override api name by 'func_name'
-    @api(func_name='details')
+    @api(func_name='details1')
     def show_details1(a:int,b:int): pass
 
     wrp =(show_details1)
-    assert wrp.func_name == 'details'
-    assert wrp.url_name == show_details1.__module__ + '.details'
+    assert wrp.func_name == 'details1'
+    assert wrp.url_name == show_details1.__module__ + '.details1'
 
-    @api(func_name='details', name='xxx')
+    @api(func_name='details2', name='xxx')
     def show_details2(a:int,b:int): pass
 
     wrp =(show_details2)
-    assert wrp.func_name == 'details'
+    assert wrp.func_name == 'details2'
     assert wrp.url_name == 'xxx'
 
 
@@ -121,7 +123,7 @@ def write_only():
     pass
 
 # django compatibility test
-@require_GET
+@mark(require_GET)
 @api
 def get_only():
     pass

@@ -19,6 +19,8 @@ from django.urls.converters import get_converters
 # make sure built-in converters are registered.
 from . import converters  # pylint: disable=unused-import
 
+from . import marker
+
 _urls = []
 _module_maps = {}  # module oaths
 _app_maps = {}  # app paths
@@ -107,7 +109,7 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
     return fpath
 
 
-def _resolve_final_handler(wrp):
+def _resolve_final_handler_old(wrp):
     # the original handler might have been wrapped by extra decorators,
     # so we must figure out the final handler as the view
     if not hasattr(wrp.func, '__name__'):
@@ -132,7 +134,13 @@ def _resolve_final_handler(wrp):
         return wrp
 
 
+def _resolve_final_handler(wrp):
+    # resolve the final handler as the outmost marked wrapper
+    return marker.get_outmost_wrapper(wrp)
+
 # pylint: disable=too-few-public-methods
+
+
 class _MultiHandlers:
     ''' multiple handlers sharing the same site-url '''
 
@@ -573,7 +581,7 @@ def get_wrapper(func):
             return wrp
 
     raise ValueError(
-        'wrapper cannot be resolved, is it wrapped with @api/@url before?')
+        'wrapper cannot be resolved, is it wrapped with @api/@url?')
 
 
 class APIResult:
@@ -601,6 +609,7 @@ class APIResult:
         return self._r['result']
 
 # debug helpers
+
 
 def _dump_urls():
     """ dump internal urls (internal) """

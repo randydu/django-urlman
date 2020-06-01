@@ -12,4 +12,4 @@ from .urlman import (mount, app_path, module_path, APIResult,
 from .decorators import (url, api, HEAD, GET, POST, PUT, PATCH, DELETE,
                          CONNECT, OPTIONS, TRACE, READ, WRITE)
 
-from .mark import mark
+from .marker import mark

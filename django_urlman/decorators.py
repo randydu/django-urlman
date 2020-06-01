@@ -3,11 +3,14 @@
 import functools
 
 from .urlman import _APIWrapper, _urls
+from . import marker
 
 
 def _wrap(func, is_url, **kwargs):
     wrp = _APIWrapper(func, is_url, **kwargs)
     _urls.append(wrp)
+
+    marker.binding(wrp, func, decorator=url if is_url else api)
     return wrp
 
 
