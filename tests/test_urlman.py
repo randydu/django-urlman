@@ -1,4 +1,5 @@
-from django_urlman.urlman import _geturl, _APIWrapper, api, url, mount, module_path, APIResult, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE, get_wrapper
+from django_urlman.urlman import _geturl, _APIWrapper, mount, module_path, APIResult, get_wrapper
+from django_urlman.decorators import api, url, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE
 
 from django.views.decorators.http import require_http_methods, require_GET, require_POST, require_safe
 

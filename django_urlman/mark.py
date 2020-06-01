@@ -6,7 +6,7 @@ _MARK = '_mark_'
 
 
 def mark(deco):
-    ''' decorator to setup bi-directional linkage between wrapper
+    ''' decorator modifier to setup bi-directional linkage between wrapper
     and wrapped functions.
     '''
     def _update_mark(obj, val):

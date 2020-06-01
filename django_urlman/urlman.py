@@ -53,6 +53,8 @@ def app_path(pkg, path):
     _app_maps[name] = path
 
 # pylint: disable=too-many-arguments
+
+
 def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, app_url=None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
@@ -105,51 +107,126 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
     return fpath
 
 
+def _resolve_final_handler(wrp):
+    # the original handler might have been wrapped by extra decorators,
+    # so we must figure out the final handler as the view
+    if not hasattr(wrp.func, '__name__'):
+        # class-based view, once wrapped by external (non-django-urlman) decorator,
+        # cannot be resolved, just returns the api-wrapper itself.
+        warnings.warn(
+            f'class-based view {wrp.func.__class__.__name__} is not compatible'
+            'with external decorators.')
+        return wrp
+
+    # SHOULD revise the conflicts with method-based dispatch
+    try:
+        mod = sys.modules[wrp.func.__module__]
+        handler = getattr(mod, wrp.func.__name__)
+        # if wrp is not handler:
+        #    print(f'external decorator detected, {wrp.__name__}')
+        return handler
+    except (KeyError, AttributeError):
+        warnings.warn(
+            f'view {wrp.func.__name__} cannot be resolved,  might be modified by'
+            'imcompatible external decorators, or defined in local scope.')
+        return wrp
+
+
+# pylint: disable=too-few-public-methods
+class _MultiHandlers:
+    ''' multiple handlers sharing the same site-url '''
+
+    def __init__(self, handlers):
+        '''
+        handlers are dict of the following pattern:
+
+        handlers: {
+            ['PUT',]: handler1,
+            ['GET',]: handler2,
+            ...
+        }
+        '''
+        super().__init__()
+
+        self._handlers = handlers
+        self.methods = {method for methods in handlers for method in methods}
+
+    def __call__(self, req, **kwargs):
+        method = req.method.upper()
+
+        for methods, handler in self._handlers.items():
+            if method in methods:
+                return handler(req, kwargs)
+
+        return HttpResponseNotAllowed(self.methods)
+
+
+def _check_multi_handlers(wrps):
+    ''' check consistency of multiple wrappers sharing the same site-url.
+     (method-based dispatch) or raise error if duplication cannot be resolved.
+    '''
+    assert len(wrps) > 1
+    site_url = wrps[0].site_url
+    url_name = wrps[0].url_name
+
+    # (1) no catch-all handler (methods =[])
+    if any(not wrp.methods for wrp in wrps):
+        raise ValueError(f'multi-handlers of site ({site_url}) '
+                         'has catch-all handler'
+                         )
+
+    # (2) no method conflicting
+    methods = {method for wrp in wrps for method in wrp.methods}
+    if len(methods) < sum(len(wrp.methods) for wrp in wrps):
+        raise ValueError(f'multi-handlers of site ({site_url}) '
+                         'have conflicting http-method'
+                         )
+    # (3) no url-name conflicting
+    if any(url_name != wrp.url_name for wrp in wrps):
+        raise ValueError(f'multi-handlers of site ({site_url}) '
+                         'have conflicting url_name'
+                         )
+
+
 def _get_all_paths(prj: str, apps: dict):
     """ get all all registered urls """
 
-    def resolve_final_handler(wrp):
-        # the original handler might have been wrapped by extra decorators,
-        # so we must figure out the final handler as the view
-        if not hasattr(wrp.func, '__name__'):
-            # class-based view, once wrapped by external (non-django-urlman) decorator,
-            # cannot be resolved, just returns the api-wrapper itself.
-            warnings.warn(
-                f'class-based view {wrp.func.__class__.__name__} is not compatible'
-                'with external decorators.')
-            return wrp
-
-        # SHOULD revise the conflicts with method-based dispatch
-        try:
-            mod = sys.modules[wrp.func.__module__]
-            handler = getattr(mod, wrp.func.__name__)
-            # if wrp is not handler:
-            #    print(f'external decorator detected, {wrp.__name__}')
-            return handler
-        except (KeyError, AttributeError):
-            warnings.warn(
-                f'view {wrp.func.__name__} cannot be resolved,  might be modified by'
-                'imcompatible external decorators, or defined in local scope.')
-            return wrp
-
-    # for pkg, module, api, handler in _urls:
+    grouped_wrps = {}  # wrappers grouped by site-url
     for wrp in _urls:
         if wrp.site_url is None:
             # site_url not specified, resolve it...
             mod = sys.modules[wrp.func.__module__]
             wrp.site_url = _geturl(
-                prj, apps, mod.__package__, wrp.func.__module__, wrp.func_name,
-                wrp.param_url, app_url=wrp.url)
+                prj, apps, mod.__package__, wrp.func.__module__,
+                wrp.func_name, wrp.param_url, app_url=wrp.url
+            )
 
-    # check duplicated site-url, merge the handlers if possible
-    # (method-based dispatch) or raise error if duplication cannot be resolved.
+        try:
+            wrps = grouped_wrps[wrp.site_url]
+            wrps.append(wrp)
+        except KeyError:
+            grouped_wrps[wrp.site_url] = [wrp]
 
     # resolve paths
     paths = []
 
-    for wrp in _urls:
+    for site_url, wrps in grouped_wrps.items():
+        wrp = wrps[0]
+        url_name = wrp.url_name
         xpath = django.urls.re_path if wrp.has_optional_param else django.urls.path
-        paths.append(xpath(wrp.site_url, resolve_final_handler(wrp), name=wrp.url_name))
+
+        if len(wrps) == 1:  # unique handler
+            paths.append(
+                xpath(site_url, _resolve_final_handler(wrp), name=url_name)
+            )
+        else:
+            _check_multi_handlers(wrps)
+
+            paths.append(
+                xpath(site_url, _MultiHandlers({
+                    wrp.methods: _resolve_final_handler(wrp) for wrp in wrps
+                }), name=url_name)
+            )
 
     return paths
 
@@ -185,7 +262,6 @@ def mount(apps: dict = None, *, urlconf=None, only_me=False):
                 mod = importlib.import_module(app)
                 if hasattr(mod, '__path__'):
                     load_package(app, mod.__path__)
-
 
     apps = {} if apps is None else {
         (k if isinstance(k, str) else k.__name__): v for k, v in apps.items()
@@ -230,7 +306,8 @@ class _APIWrapper:
             'name', func.__module__ + '.' + self.func_name)
         self.url = kwargs.get('url', None)  # app-wide url
         self.site_url = kwargs.get('site_url', None)  # site-wide url
-        self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
+        #self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
+        self.methods = {x.upper() for x in kwargs.get('methods', [])}
 
         self._is_url = is_url
 
@@ -482,27 +559,6 @@ class _APIWrapper:
         return self.defaults != {}
 
 
-def _wrap(func, is_url, **kwargs):
-    wrp = _APIWrapper(func, is_url, **kwargs)
-    _urls.append(wrp)
-    return wrp
-
-
-def _api(func=None, is_url=False, **kwargs):
-    if callable(func):
-        # decorator without parameters, or called directly with api(f)
-        return _wrap(func, is_url, **kwargs)
-
-    # decorator with parameters
-    def wrap(func):
-        return _wrap(func, is_url, **kwargs)
-    return wrap
-
-
-api = functools.partial(_api, is_url=False)
-url = functools.partial(_api, is_url=True)
-
-
 def get_wrapper(func):
     ''' [INTERNAL] get the APIWrapper instance from wrapped function '''
     if isinstance(func, _APIWrapper):
@@ -544,57 +600,7 @@ class APIResult:
         '''
         return self._r['result']
 
-# method decorators
-# ref: @api(methods=['GET','HEAD'])
-#
-#
-#    @get : only support method GET
-#
-#    @GET
-#    @api
-#    def foo():pass
-#
-#    @GET
-#    @HEAD
-#    @api
-#    def bar():pass
-#
-#    is equal to:
-#
-#    @api(methods = ['GET', 'HEAD'])
-#    def bar():pass
-#
-
-
-def _add_method(func, *, method):
-    if not isinstance(func, _APIWrapper):
-        raise ValueError(
-            'method decorator should be applied on top of @api/@url!')
-
-    if isinstance(method, str):
-        func.methods = {*func.methods, method}
-    else:
-        func.methods = {*func.methods, *method}
-
-    return func
-
-
-GET = functools.partial(_add_method, method='GET')
-POST = functools.partial(_add_method, method='POST')
-PUT = functools.partial(_add_method, method='PUT')
-HEAD = functools.partial(_add_method, method='HEAD')
-DELETE = functools.partial(_add_method, method='DELETE')
-PATCH = functools.partial(_add_method, method='PATCH')
-CONNECT = functools.partial(_add_method, method='CONNECT')
-OPTIONS = functools.partial(_add_method, method='OPTIONS')
-TRACE = functools.partial(_add_method, method='TRACE')
-
-# macros
-READ = functools.partial(_add_method, method=('GET', 'HEAD'))
-WRITE = functools.partial(_add_method, method=('POST', 'PUT', 'PATCH'))
-
 # debug helpers
-
 
 def _dump_urls():
     """ dump internal urls (internal) """

@@ -1,6 +1,6 @@
 ''' Test wrapper '''
 
-from django_urlman.wrapper import *
+from django_urlman.mark import *
 
 def test_mark1():
     ''' test mark decorator '''
