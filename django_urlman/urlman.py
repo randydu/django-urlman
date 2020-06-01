@@ -146,25 +146,25 @@ class _MultiHandlers:
 
     def __init__(self, handlers):
         '''
-        handlers are dict of the following pattern:
+        handlers is a list of the following pattern:
 
-        handlers: {
-            ['PUT',]: handler1,
-            ['GET',]: handler2,
+        handlers: [
+            (['PUT',], handler1),
+            (['GET',], handler2),
             ...
-        }
+        ]
         '''
         super().__init__()
 
         self._handlers = handlers
-        self.methods = {method for methods in handlers for method in methods}
+        self.methods = {method for methods, _ in handlers for method in methods}
 
     def __call__(self, req, **kwargs):
         method = req.method.upper()
 
-        for methods, handler in self._handlers.items():
+        for methods, handler in self._handlers:
             if method in methods:
-                return handler(req, kwargs)
+                return handler(req, **kwargs)
 
         return HttpResponseNotAllowed(self.methods)
 
@@ -231,9 +231,9 @@ def _get_all_paths(prj: str, apps: dict):
             _check_multi_handlers(wrps)
 
             paths.append(
-                xpath(site_url, _MultiHandlers({
-                    wrp.methods: _resolve_final_handler(wrp) for wrp in wrps
-                }), name=url_name)
+                xpath(site_url, _MultiHandlers([
+                    (wrp.methods, _resolve_final_handler(wrp)) for wrp in wrps
+                ]), name=url_name)
             )
 
     return paths

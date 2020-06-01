@@ -137,7 +137,7 @@ def name():
     return _name
 
 @PUT
-@api
+@api(param_autos=['name'])
 def name(name,/): # pylint: disable=function-redefined
     global _name
     old_name, _name = _name, name
@@ -274,7 +274,7 @@ def test_site_url():
     assert response.status_code == 200
     assert response.json()['result'] == 'Ruby'
 
-    response = client.put('/name/Janet/')
+    response = client.put('/name/?name=Janet')
     assert response.status_code == 200
     assert response.json()['result'] == 'Ruby' # last name
 
