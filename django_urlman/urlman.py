@@ -410,25 +410,35 @@ class _APIWrapper:
         if self.pos_call:
             # extract call_by_pos params
             myargs = []
-            for param in self.pos_call:
+
+            if self.func_type == FuncType.CLASS_METHOD:
+                myargs.append(self.cls) # cls
+                pos_call = self.pos_call[1:]
+            elif self.func_type == FuncType.METHOD:
+                myargs.append(self.cls()) # self
+                pos_call = self.pos_call[1:]
+            else:
+                pos_call = self.pos_call
+
+            for param in pos_call:
                 myargs.append(kwargs[param])
                 kwargs.pop(param)
 
             if self._is_url:
                 if kwargs:
-                    result = self.func(req, *myargs, **kwargs)
+                    result = self.real_func(req, *myargs, **kwargs)
                 else:
-                    result = self.func(req, *myargs)
+                    result = self.real_func(req, *myargs)
             else:
                 if kwargs:
-                    result = self.func(*myargs, **kwargs)
+                    result = self.real_func(*myargs, **kwargs)
                 else:
-                    result = self.func(*myargs)
+                    result = self.real_func(*myargs)
         else:
             if self._is_url:
-                result = self.func(req, **kwargs)
+                result = self.real_func(req, **kwargs)
             else:
-                result = self.func(**kwargs)
+                result = self.real_func(**kwargs)
 
         return result
 

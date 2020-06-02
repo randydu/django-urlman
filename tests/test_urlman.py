@@ -315,3 +315,15 @@ def test_site_url():
     assert Monitor().status.site_url == 'Monitor/status/'
     assert Monitor.settings.site_url == 'Monitor/settings/'
     assert Monitor.ping.site_url == 'Monitor/ping/'
+
+    r = APIResult(client.get('/Monitor/status/'))
+    assert r.status_code == 200
+    assert r.result == 10
+
+    r = APIResult(client.get('/Monitor/settings/'))
+    assert r.status_code == 200
+    assert r.result == Monitor.MAX_CONNECTIONS
+
+    r = APIResult(client.get('/Monitor/ping/'))
+    assert r.status_code == 200
+    assert r.result == 'OK'
