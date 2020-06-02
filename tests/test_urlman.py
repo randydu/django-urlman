@@ -27,6 +27,12 @@ def test_geturl():
 
     assert _geturl(prj, {}, '', 'health', 'ping', '', app_url="check") == 'health/check/'
 
+# class-based api
+class Monitor:
+    @api
+    def status(self):
+        pass
+
 def test_api_param_url():
     @api
     def g(): pass
@@ -65,14 +71,7 @@ def test_api_param_url():
     assert (pos_only_and_optional3).param_url == '(?:/(?P<a>[0-9]+))?'
 
 
-    # class-based api
-    class Monitor:
-        @api
-        def status(self):
-            pass
-
-    monitor = Monitor()
-    assert monitor.status.param_url == '' # pylint: disable=no-member
+    assert Monitor().status.param_url == '' # pylint: disable=no-member
     
 
 def test_names():

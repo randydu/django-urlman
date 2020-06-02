@@ -157,7 +157,8 @@ class _MultiHandlers:
         super().__init__()
 
         self._handlers = handlers
-        self.methods = {method for methods, _ in handlers for method in methods}
+        self.methods = {method for methods,
+                        _ in handlers for method in methods}
 
     def __call__(self, req, **kwargs):
         method = req.method.upper()
@@ -300,6 +301,8 @@ class _MyJSONEncoder(DjangoJSONEncoder):
             return result
 
 # pylint: disable=too-many-instance-attributes
+
+
 class _APIWrapper:
     """ Request handler for wrapped api """
 
@@ -326,7 +329,14 @@ class _APIWrapper:
         self.param_autos = kwargs.get('param_autos', ())
 
         # class-based api?
-        # self.cls = utils.get_class(func)
+        self.func_type, self.cls = utils.get_typeinfo(func)
+        if self.func_type in (utils.FuncType.METHOD, utils.FuncType.CLASS_METHOD) \
+                and self.cls is None:
+            raise ValueError(
+                f'class of member function "{self.func_name}" cannot be resolved.\n'
+                'as a result the api cannot be called later!\n'
+                'please do not put the class definiation inside a function.'
+                )
 
         params = inspect.signature(func).parameters
 

@@ -1,6 +1,6 @@
 ''' test utility.py '''
 
-from django_urlman.utils import get_class
+from django_urlman.utils import get_class, get_typeinfo, FuncType
 
 import pytest
 
@@ -29,7 +29,7 @@ def test_top_levels_bounded():
     assert get_class(c.f) is C
     assert get_class(d.g) is C.D
 
-def test_wrapper():
+def test_nested():
     class E:
         @classmethod
         def e(cls):
@@ -63,3 +63,53 @@ def test_wrapper():
 
     with pytest.raises(ValueError):
         get_class(E.F.h)
+
+# -------- TypeInfo ----------
+class A:
+    def m(self):pass
+    
+    @staticmethod
+    def s():pass
+
+    @classmethod
+    def c(cls):pass
+
+def test_info():
+    ''' test get_typeinfo '''
+    assert get_typeinfo(A.m) == (FuncType.METHOD, A)
+    assert get_typeinfo(A.s) == (FuncType.STATIC_METHOD, A)
+    assert get_typeinfo(A.c) == (FuncType.CLASS_METHOD, A)
+
+    a = A()
+    assert get_typeinfo(a.m) == (FuncType.METHOD, A)
+    assert get_typeinfo(a.s) == (FuncType.STATIC_METHOD, A)
+    assert get_typeinfo(a.c) == (FuncType.CLASS_METHOD, A)
+
+    class B:
+        def m(self):pass
+        
+        @staticmethod
+        def s():pass
+
+        @classmethod
+        def c(cls):pass
+
+    assert get_typeinfo(B.m) == (FuncType.METHOD, None)
+    assert get_typeinfo(B.s) == (FuncType.STATIC_METHOD, None)
+    assert get_typeinfo(B.c) == (FuncType.CLASS_METHOD, B)
+
+    b = B()
+    assert get_typeinfo(b.m) == (FuncType.METHOD, B)
+    assert get_typeinfo(b.s) == (FuncType.STATIC_METHOD, None)
+    assert get_typeinfo(b.c) == (FuncType.CLASS_METHOD, B)
+
+
+# Callable
+class K:
+    def __call__(self):
+        pass
+
+def test_callable():
+    k = K()
+    assert get_class(k) == K
+    assert get_typeinfo(k) == (FuncType.CLASS_CALLABLE, K)
