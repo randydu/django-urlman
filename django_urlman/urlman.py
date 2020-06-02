@@ -19,7 +19,8 @@ from django.urls.converters import get_converters
 # make sure built-in converters are registered.
 from . import converters  # pylint: disable=unused-import
 
-from . import marker, utils
+from . import marker
+from .utils import FuncType, get_typeinfo
 
 _urls = []
 _module_maps = {}  # module oaths
@@ -57,7 +58,8 @@ def app_path(pkg, path):
 # pylint: disable=too-many-arguments
 
 
-def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, app_url=None):
+def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
+            module_maps=None, app_url=None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
@@ -85,6 +87,9 @@ def _geturl(prj, app_paths, pkg, module, fname, param_url, *, module_maps=None, 
 
         while parts and parts[0] == '':
             parts = parts[1:]
+
+        if clsname:
+            parts.append(clsname)
 
         if fname:
             parts.append(fname)
@@ -204,7 +209,7 @@ def _get_all_paths(prj: str, apps: dict):
     for wrp in _urls:
         # make sure the api can be called properly
         wrp.cls = None if wrp.cls_resolver is None else wrp.cls_resolver()
-        if wrp.func_type in (utils.FuncType.METHOD, utils.FuncType.CLASS_METHOD) \
+        if wrp.func_type in (FuncType.METHOD, FuncType.CLASS_METHOD) \
                 and wrp.cls is None:
             raise ValueError(
                 f'class of member function "{wrp.func_name}" cannot be resolved.\n'
@@ -214,9 +219,11 @@ def _get_all_paths(prj: str, apps: dict):
 
         if wrp.site_url is None:
             # site_url not specified, resolve it...
-            mod = sys.modules[wrp.func.__module__]
+            mod_name = wrp.real_func.__module__
+            mod = sys.modules[mod_name]
             wrp.site_url = _geturl(
-                prj, apps, mod.__package__, wrp.func.__module__,
+                prj, apps, mod.__package__, mod_name,
+                '' if wrp.cls is None else wrp.cls.__name__,
                 wrp.func_name, wrp.param_url, app_url=wrp.url
             )
 
@@ -320,10 +327,24 @@ class _APIWrapper:
         functools.update_wrapper(self, func, updated=())
 
         self.func = func
-        self.func_name = kwargs.get('func_name', func.__name__ if hasattr(
-            func, '__name__') else func.__class__.__name__)
-        self.url_name = kwargs.get(
-            'name', func.__module__ + '.' + self.func_name)
+
+        is_classmethod = isinstance(func, classmethod)
+        # the original function @classmethod is applied
+        self.real_func = func.__func__ if is_classmethod else func
+
+        try:
+            self.func_name = kwargs['func_name']
+        except KeyError:
+            try:
+                self.func_name = self.real_func.__name__
+            except AttributeError:
+                self.func_name = type(self.real_func).__name__
+
+        try:
+            self.url_name = kwargs['name']
+        except KeyError:
+            self.url_name = self.real_func.__module__ + '.' + self.func_name
+
         self.url = kwargs.get('url', None)  # app-wide url
         self.site_url = kwargs.get('site_url', None)  # site-wide url
         #self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
@@ -339,9 +360,11 @@ class _APIWrapper:
         self.param_autos = kwargs.get('param_autos', ())
 
         # class-based api?
-        self.func_type, self.cls_resolver = utils.get_typeinfo(func)
+        self.func_type, self.cls_resolver = get_typeinfo(self.real_func)
+        if is_classmethod:
+            self.func_type = FuncType.CLASS_METHOD
 
-        params = inspect.signature(func).parameters
+        params = inspect.signature(self.real_func).parameters
 
         param_types = kwargs.get('param_types', {})
 
@@ -568,9 +591,16 @@ class _APIWrapper:
                 except KeyError:
                     typ = ''
 
-                return f"/<{typ}{param}>" if param in self.pos_only else f"/{param}/<{typ}{param}>"
+                return f"/<{typ}{param}>" if param in self.pos_only \
+                    else f"/{param}/<{typ}{param}>"
 
-        return ''.join([get_one_url(x) for x in self.names if x not in self.param_autos])
+        # skip "self"/"cls" first parameter
+        if self.func_type in (FuncType.CLASS_METHOD, FuncType.METHOD):
+            names = self.names[1:]
+        else:
+            names = self.names
+
+        return ''.join([get_one_url(x) for x in names if x not in self.param_autos])
 
     @property
     def has_optional_param(self):

@@ -1,4 +1,4 @@
-from django_urlman.urlman import _geturl, _APIWrapper, mount, module_path, APIResult, get_wrapper
+from django_urlman.urlman import _geturl, _APIWrapper, mount, module_path, APIResult, get_wrapper, _dump_urls
 from django_urlman.decorators import api, url, HEAD, GET, POST, PUT, PATCH, DELETE, READ, WRITE
 from django_urlman.marker import mark
 
@@ -10,28 +10,42 @@ from . import settings
 
 def test_geturl():
     prj = "coolsite"
-    assert _geturl(prj, {}, '', 'health', 'ping', '') == 'health/ping/'
-    assert _geturl(prj, { 'mymath': 'math'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '') == 'math/algo/add/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '', '') == 'math/algo/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '', '/xx') == 'math/algo/xx/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '/a/<int:a>/b/<int:b>') == 'math/algo/add/a/<int:a>/b/<int:b>/'
+    assert _geturl(prj, {}, '', 'health', '','ping', '') == 'health/ping/'
+    assert _geturl(prj, { 'mymath': 'math'} , 'mymath', 'mymath.algo', '','add', '') == 'math/algo/add/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '','add', '') == 'math/algo/add/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '','', '') == 'math/algo/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '','', '/xx') == 'math/algo/xx/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '','add', '/a/<int:a>/b/<int:b>') == 'math/algo/add/a/<int:a>/b/<int:b>/'
 
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', 'add', '', module_maps = {'mymath.algo':''}) == 'math/add/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', 'add1', '', 
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo', '','add', '', module_maps = {'mymath.algo':''}) == 'math/add/'
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', '', 'add1', '', 
         module_maps = {'mymath.algo':''}) == 'math/advanced/add1/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', 'add1', '', 
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced', '','add1', '', 
         module_maps = {'mymath.algo':'', 'mymath.algo.advanced':'super'}) == 'math/super/add1/'
-    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced.internal', 'add2', '', 
+    assert _geturl(prj, { 'mymath': 'math/'} , 'mymath', 'mymath.algo.advanced.internal','', 'add2', '', 
         module_maps = {'mymath.algo':'base', 'mymath.algo.advanced':'super'}) == 'math/super/internal/add2/'
 
-    assert _geturl(prj, {}, '', 'health', 'ping', '', app_url="check") == 'health/check/'
+    assert _geturl(prj, {}, '', 'health', '','ping', '', app_url="check") == 'health/check/'
 
 # class-based api
 class Monitor:
+    MAX_CONNECTIONS = 20
+
+    def __init__(self):
+        self._connections = 10
+
     @api
     def status(self):
-        pass
+        return self._connections
+    @api
+    @classmethod
+    def settings(cls):
+        return cls.MAX_CONNECTIONS
+
+    @api
+    @staticmethod
+    def ping():
+        return 'OK'
 
 def test_api_param_url():
     @api
@@ -161,6 +175,8 @@ def test_site_url():
     module_path(__name__,'')
     # mount(urlconf=__name__) # mount all registered apis
     mount(only_me=True) # mount all registered apis
+
+    _dump_urls()
 
     
     # --- hey ---
@@ -294,3 +310,8 @@ def test_site_url():
     response = client.get('/name/')
     assert response.status_code == 200
     assert response.json()['result'] == 'Janet'
+
+    # test class-based api
+    assert Monitor().status.site_url == 'Monitor/status/'
+    assert Monitor.settings.site_url == 'Monitor/settings/'
+    assert Monitor.ping.site_url == 'Monitor/ping/'
