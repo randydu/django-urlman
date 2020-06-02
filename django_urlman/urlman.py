@@ -202,6 +202,16 @@ def _get_all_paths(prj: str, apps: dict):
 
     grouped_wrps = {}  # wrappers grouped by site-url
     for wrp in _urls:
+        # make sure the api can be called properly
+        wrp.cls = None if wrp.cls_resolver is None else wrp.cls_resolver()
+        if wrp.func_type in (utils.FuncType.METHOD, utils.FuncType.CLASS_METHOD) \
+                and wrp.cls is None:
+            raise ValueError(
+                f'class of member function "{wrp.func_name}" cannot be resolved.\n'
+                'as a result the api cannot be called later!\n'
+                'please do not put the class definiation inside a function.'
+            )
+
         if wrp.site_url is None:
             # site_url not specified, resolve it...
             mod = sys.modules[wrp.func.__module__]
@@ -329,14 +339,7 @@ class _APIWrapper:
         self.param_autos = kwargs.get('param_autos', ())
 
         # class-based api?
-        self.func_type, self.cls = utils.get_typeinfo(func)
-        if self.func_type in (utils.FuncType.METHOD, utils.FuncType.CLASS_METHOD) \
-                and self.cls is None:
-            raise ValueError(
-                f'class of member function "{self.func_name}" cannot be resolved.\n'
-                'as a result the api cannot be called later!\n'
-                'please do not put the class definiation inside a function.'
-                )
+        self.func_type, self.cls_resolver = utils.get_typeinfo(func)
 
         params = inspect.signature(func).parameters
 

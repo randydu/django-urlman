@@ -19,15 +19,15 @@ class C:
 def test_top_levels():
     assert get_class(foo) is None
 
-    assert get_class(C.f) is C
-    assert get_class(C.D.g) is C.D
+    assert get_class(C.f)() is C
+    assert get_class(C.D.g)() is C.D
 
 def test_top_levels_bounded():
 
     c = C()
     d = C.D()
-    assert get_class(c.f) is C
-    assert get_class(d.g) is C.D
+    assert get_class(c.f)() is C
+    assert get_class(d.g)() is C.D
 
 def test_nested():
     class E:
@@ -49,13 +49,13 @@ def test_nested():
     eo = E()
     fo = E.F()
 
-    assert get_class(E.e) is E
-    assert get_class(E.F.g) is E.F
+    assert get_class(E.e)() is E
+    assert get_class(E.F.g)() is E.F
 
-    assert get_class(eo.e) is E
-    assert get_class(eo.f) is E
-    assert get_class(fo.g) is E.F
-    assert get_class(fo.h) is E.F
+    assert get_class(eo.e)() is E
+    assert get_class(eo.f)() is E
+    assert get_class(fo.g)() is E.F
+    assert get_class(fo.h)() is E.F
 
     # nested non-bounded function is not supported!
     with pytest.raises(ValueError):
@@ -74,16 +74,22 @@ class A:
     @classmethod
     def c(cls):pass
 
+def check(func, ft, cls):
+    functype, fcls = get_typeinfo(func)
+    cls0 = None if fcls is None else fcls()
+    assert functype == ft
+    assert cls0 == cls
 def test_info():
     ''' test get_typeinfo '''
-    assert get_typeinfo(A.m) == (FuncType.METHOD, A)
-    assert get_typeinfo(A.s) == (FuncType.STATIC_METHOD, A)
-    assert get_typeinfo(A.c) == (FuncType.CLASS_METHOD, A)
+
+    check(A.m, FuncType.METHOD, A)
+    check(A.s,FuncType.STATIC_METHOD, A)
+    check(A.c, FuncType.CLASS_METHOD, A)
 
     a = A()
-    assert get_typeinfo(a.m) == (FuncType.METHOD, A)
-    assert get_typeinfo(a.s) == (FuncType.STATIC_METHOD, A)
-    assert get_typeinfo(a.c) == (FuncType.CLASS_METHOD, A)
+    check(a.m, FuncType.METHOD, A)
+    check(a.s, FuncType.STATIC_METHOD, A)
+    check(a.c, FuncType.CLASS_METHOD, A)
 
     class B:
         def m(self):pass
@@ -94,15 +100,14 @@ def test_info():
         @classmethod
         def c(cls):pass
 
-    assert get_typeinfo(B.m) == (FuncType.METHOD, None)
-    assert get_typeinfo(B.s) == (FuncType.STATIC_METHOD, None)
-    assert get_typeinfo(B.c) == (FuncType.CLASS_METHOD, B)
+    check(B.m, FuncType.METHOD, None)
+    check(B.s, FuncType.STATIC_METHOD, None)
+    check(B.c, FuncType.CLASS_METHOD, B)
 
     b = B()
-    assert get_typeinfo(b.m) == (FuncType.METHOD, B)
-    assert get_typeinfo(b.s) == (FuncType.STATIC_METHOD, None)
-    assert get_typeinfo(b.c) == (FuncType.CLASS_METHOD, B)
-
+    check(b.m, FuncType.METHOD, B)
+    check(b.s, FuncType.STATIC_METHOD, None)
+    check(b.c, FuncType.CLASS_METHOD, B)
 
 # Callable
 class K:
@@ -111,5 +116,5 @@ class K:
 
 def test_callable():
     k = K()
-    assert get_class(k) == K
-    assert get_typeinfo(k) == (FuncType.CLASS_CALLABLE, K)
+    assert get_class(k)() == K
+    check(k, FuncType.CLASS_CALLABLE, K)

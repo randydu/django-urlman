@@ -2,6 +2,7 @@
 import sys
 import inspect
 import enum
+import functools
 
 
 def _must_be_callable(obj):
@@ -15,10 +16,9 @@ def _is_class_object(obj):
     return type(obj).__name__ not in ('function', 'method')
 
 
-def try_resolve_class(module, clsname):
+def _try_resolve_class(module, parts):
     ''' try resolving class object from its name '''
     mod = sys.modules[module]
-    parts = clsname.split('.')
     cls = None
     for i, name in enumerate(parts):
         if i == 0:
@@ -31,41 +31,49 @@ def try_resolve_class(module, clsname):
 def get_class(func):
     ''' extract class object of a callable (function or class-object)
 
-        returns None for top-level function
+        returns None for top-level function, or function to resolve the
+        class object
+
+        Example:
+
+        def hello():
+            pass
+
+        class Sample:
+            def foo(self):
+                pass
+
+        assert get_class(hello) is None
+        assert get_class(Sample.foo)() == Sample
+
     '''
     _must_be_callable(func)
 
     if _is_class_object(func):
-        return type(func)
+        return lambda: type(func)
 
     # functions
     parts = func.__qualname__.split('.')[:-1]
 
-    cls = None
+    if not parts:
+        return None
 
-    if parts:
-        if '<locals>' in parts:
-            if hasattr(func, '__self__'):
-                # bounded
-                self = func.__self__
-                if isinstance(self, type):
-                    # class-method
-                    return self
-                return type(self)
+    if '<locals>' in parts:
+        if hasattr(func, '__self__'):
+            # bounded
+            self = func.__self__
+            if isinstance(self, type):
+                # class-method
+                return lambda: self
+            return lambda: type(self)
 
-            # we cannot resolve the class of unbounded local scope function
-            raise ValueError(f'class of nested unbound function {func.__qualname__}'
-                             'cannot be resolved'
-                             )
+        # we cannot resolve the class of unbounded local scope function
+        raise ValueError(f'class of nested unbound function {func.__qualname__}'
+                         'cannot be resolved'
+                         )
 
-        mod = sys.modules[func.__module__]
-        for i, name in enumerate(parts):
-            if i == 0:
-                cls = getattr(mod, name)
-            else:
-                cls = getattr(cls, name)
-
-    return cls
+    return functools.partial(_try_resolve_class,
+                             module=func.__module__, parts=parts)
 
 
 class FuncType(enum.IntEnum):
@@ -78,16 +86,16 @@ class FuncType(enum.IntEnum):
     CLASS_CALLABLE = 4  # A class-based callable object
 
 
-def get_typeinfo(func) -> (FuncType, type):
+def get_typeinfo(func):
     ''' get function type info
-       returns (FuncType, Class)
+       returns (FuncType, None or function to resolve class object)
     '''
 
     _must_be_callable(func)
 
     if _is_class_object(func):
         # class based callable object
-        return FuncType.CLASS_CALLABLE, type(func)
+        return FuncType.CLASS_CALLABLE, lambda: type(func)
 
     try:
         cls = get_class(func)
