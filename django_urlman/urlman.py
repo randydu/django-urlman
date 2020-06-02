@@ -329,8 +329,9 @@ class _APIWrapper:
         self.func = func
 
         is_classmethod = isinstance(func, classmethod)
-        # the original function @classmethod is applied
-        self.real_func = func.__func__ if is_classmethod else func
+        is_staticmethod = isinstance(func, staticmethod)
+        # the original function @classmethod/@staticmethod is applied
+        self.real_func = func.__func__ if is_classmethod or is_staticmethod else func
 
         try:
             self.func_name = kwargs['func_name']
@@ -363,6 +364,8 @@ class _APIWrapper:
         self.func_type, self.cls_resolver = get_typeinfo(self.real_func)
         if is_classmethod:
             self.func_type = FuncType.CLASS_METHOD
+        elif is_staticmethod:
+            self.func_type = FuncType.STATIC_METHOD
 
         params = inspect.signature(self.real_func).parameters
 
