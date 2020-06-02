@@ -29,6 +29,10 @@ def test_geturl():
 
 def test_api_param_url():
     @api
+    def g(): pass
+    assert (g).param_url == ''
+
+    @api
     def f(a,b): pass
     assert (f).param_url == '/a/<a>/b/<b>'
 
@@ -60,6 +64,16 @@ def test_api_param_url():
     def pos_only_and_optional3(a:int=0,/):pass
     assert (pos_only_and_optional3).param_url == '(?:/(?P<a>[0-9]+))?'
 
+
+    # class-based api
+    class Monitor:
+        @api
+        def status(self):
+            pass
+
+    monitor = Monitor()
+    assert monitor.status.param_url == '' # pylint: disable=no-member
+    
 
 def test_names():
     # override api name by 'func_name'

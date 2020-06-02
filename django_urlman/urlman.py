@@ -19,7 +19,7 @@ from django.urls.converters import get_converters
 # make sure built-in converters are registered.
 from . import converters  # pylint: disable=unused-import
 
-from . import marker
+from . import marker, utils
 
 _urls = []
 _module_maps = {}  # module oaths
@@ -299,10 +299,9 @@ class _MyJSONEncoder(DjangoJSONEncoder):
                 result['_cls_'] = type(o).__name__
             return result
 
-
+# pylint: disable=too-many-instance-attributes
 class _APIWrapper:
     """ Request handler for wrapped api """
-    # pylint: disable=too-many-instance-attributes
 
     def __init__(self, func, is_url=False, **kwargs):
         functools.update_wrapper(self, func, updated=())
@@ -325,6 +324,9 @@ class _APIWrapper:
         self.pos_only = []  # position only param
         # param should be retrieved from body, query
         self.param_autos = kwargs.get('param_autos', ())
+
+        # class-based api?
+        # self.cls = utils.get_class(func)
 
         params = inspect.signature(func).parameters
 
