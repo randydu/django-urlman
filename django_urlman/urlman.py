@@ -503,6 +503,15 @@ class _APIWrapper:
 
         return (found, value)
 
+    def call(self, *args, **kwargs):
+        """ call wrapped function as usual """
+        if self.func_type in (FuncType.PLAIN, FuncType.STATIC_METHOD, FuncType.CLASS_CALLABLE):
+            return self.real_func(*args, **kwargs)
+        if self.func_type == FuncType.CLASS_METHOD:
+            return self.real_func(self.cls, *args, **kwargs)
+        if self.func_type == FuncType.METHOD:
+            return self.real_func(self.cls(), *args, **kwargs)
+
     def __call__(self, req, **kwargs):
         """ entry point of request handling called by diango.
             * args is never used by diango when calling, all parameters are
