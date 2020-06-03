@@ -8,6 +8,7 @@ import traceback
 import functools
 import json
 import warnings
+import enum
 
 import django.conf
 import django.urls
@@ -25,6 +26,20 @@ from .utils import FuncType, get_typeinfo
 _urls = []
 _module_maps = {}  # module oaths
 _app_maps = {}  # app paths
+
+
+class TrailingSlash(enum.IntEnum):
+    """ setup policy of URI's trailing slash generation """
+    NO = 0  # appending trailing slash
+    YES = 1  # no trailing slash
+    # depending the mount( trailing_slash ) or default global settings
+    INHERIT = 2
+
+
+# global settings
+settings = {
+    'trailing_slash': True,
+}
 
 
 def module_path(module, path):
@@ -59,7 +74,7 @@ def app_path(pkg, path):
 
 
 def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
-            module_maps=None, app_url=None):
+            module_maps=None, app_url=None, trailing_slash=True):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
@@ -105,8 +120,13 @@ def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
     fpath += param_url
 
     # force trailing slash to avoid potential django route resolving issue.
-    if not fpath.endswith('/'):
-        fpath += '/'
+    # (ref: https://docs.djangoproject.com/en/dev/ref/settings/#append-slash)
+    if trailing_slash:
+        if not fpath.endswith('/'):
+            fpath += '/'
+    else:
+        fpath.rstrip('/')
+
     # no leading slash to make django system check happy.
     if fpath != '/':
         fpath = fpath.lstrip('/')
@@ -202,7 +222,7 @@ def _check_multi_handlers(wrps):
                          )
 
 
-def _get_all_paths(prj: str, apps: dict):
+def _get_all_paths(prj: str, apps: dict, trailing_slash):
     """ get all all registered urls """
 
     grouped_wrps = {}  # wrappers grouped by site-url
@@ -224,7 +244,10 @@ def _get_all_paths(prj: str, apps: dict):
             wrp.site_url = _geturl(
                 prj, apps, mod.__package__, mod_name,
                 '' if wrp.cls is None else wrp.cls.__name__,
-                wrp.func_name, wrp.param_url, app_url=wrp.url
+                wrp.func_name, wrp.param_url, app_url=wrp.url,
+                trailing_slash=trailing_slash if wrp.trailing_slash ==
+                TrailingSlash.INHERIT else wrp.trailing_slash ==
+                TrailingSlash.YES
             )
 
         try:
@@ -257,10 +280,14 @@ def _get_all_paths(prj: str, apps: dict):
     return paths
 
 
-def mount(apps: dict = None, *, urlconf=None, only_me=False):
+def mount(apps: dict = None, *, urlconf=None, only_me=False, trailing_slash=None):
     """ adds all registered api/url handlers """
 
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
+
+    if trailing_slash is None:
+        trailing_slash = settings['trailing_slash']
+
     mroot = importlib.import_module(urlconf)
     prj = mroot.__package__
     # apps: if apps are not imported previously, it can be imported here.
@@ -294,9 +321,9 @@ def mount(apps: dict = None, *, urlconf=None, only_me=False):
     }
 
     if only_me:
-        mroot.urlpatterns = _get_all_paths(prj, apps)
+        mroot.urlpatterns = _get_all_paths(prj, apps, trailing_slash)
     else:
-        mroot.urlpatterns += _get_all_paths(prj, apps)
+        mroot.urlpatterns += _get_all_paths(prj, apps, trailing_slash)
 
 
 class _MyJSONEncoder(DjangoJSONEncoder):
@@ -350,6 +377,9 @@ class _APIWrapper:
         self.site_url = kwargs.get('site_url', None)  # site-wide url
         #self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
         self.methods = {x.upper() for x in kwargs.get('methods', [])}
+
+        self.trailing_slash = kwargs.get(
+            'trailing_slash', TrailingSlash.INHERIT)
 
         self._is_url = is_url
 
