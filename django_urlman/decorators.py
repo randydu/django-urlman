@@ -15,8 +15,7 @@ def _wrap(func, is_url, **kwargs):
 
 
 def _api(func=None, is_url=False, **kwargs):
-    if callable(func) or isinstance(func, classmethod) or \
-            isinstance(func, staticmethod):
+    if callable(func) or isinstance(func, (classmethod, staticmethod)):
         # decorator without parameters, or called directly with api(f)
         return _wrap(func, is_url, **kwargs)
 

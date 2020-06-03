@@ -55,7 +55,7 @@ def app_path(pkg, path):
 
     _app_maps[name] = path
 
-# pylint: disable=too-many-arguments
+# pylint: disable=(too-many-arguments, too-many-locals)
 
 
 def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
@@ -367,22 +367,28 @@ class _APIWrapper:
         elif is_staticmethod:
             self.func_type = FuncType.STATIC_METHOD
 
+        self._parse_signature(kwargs.get('param_types', {}))
+
+    def _parse_signature(self, param_types):
+        ''' parse api signaure '''
+
         params = inspect.signature(self.real_func).parameters
-
-        param_types = kwargs.get('param_types', {})
-
         self.names = [*params]
-        if is_url:
-            # skip first parameter (request)
+
+        # skip "self"/"cls" first parameter
+        if self.func_type in (FuncType.CLASS_METHOD, FuncType.METHOD):
             self.names = self.names[1:]
 
-        for i, name in enumerate(self.names):
+        if self._is_url:
+            # skip fixed positional parameter (request)
+            self.names = self.names[1:]
+
+        for name in self.names:
             param = params[name]
 
             if (param.kind == inspect.Parameter.POSITIONAL_ONLY or
                     param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD):
                 # call by position
-                assert len(self.pos_call) == i
                 self.pos_call.append(name)
 
                 if param.kind == inspect.Parameter.POSITIONAL_ONLY:
@@ -390,10 +396,10 @@ class _APIWrapper:
 
             value = param.default
 
-            if value == inspect._empty:
+            if value == inspect.Signature.empty:
                 # no default value
                 cls = param.annotation
-                if cls != inspect._empty:
+                if cls != inspect.Signature.empty:
                     self.types[name] = cls
                 else:
                     # decorator provided type annotation via 'param_types'
@@ -407,40 +413,22 @@ class _APIWrapper:
     def _invoke(self, req, **kwargs):
         """ invoke wrapped function """
 
-        if self.pos_call:
-            # extract call_by_pos params
-            myargs = []
+        # extract call_by_pos params
+        myargs = []
 
-            if self.func_type == FuncType.CLASS_METHOD:
-                myargs.append(self.cls) # cls
-                pos_call = self.pos_call[1:]
-            elif self.func_type == FuncType.METHOD:
-                myargs.append(self.cls()) # self
-                pos_call = self.pos_call[1:]
-            else:
-                pos_call = self.pos_call
+        if self.func_type == FuncType.CLASS_METHOD:
+            myargs.append(self.cls)  # cls,  pylint: disable=no-member
+        elif self.func_type == FuncType.METHOD:
+            myargs.append(self.cls())  # self, pylint: disable=no-member
 
-            for param in pos_call:
-                myargs.append(kwargs[param])
-                kwargs.pop(param)
+        if self._is_url:
+            myargs.append(req)
 
-            if self._is_url:
-                if kwargs:
-                    result = self.real_func(req, *myargs, **kwargs)
-                else:
-                    result = self.real_func(req, *myargs)
-            else:
-                if kwargs:
-                    result = self.real_func(*myargs, **kwargs)
-                else:
-                    result = self.real_func(*myargs)
-        else:
-            if self._is_url:
-                result = self.real_func(req, **kwargs)
-            else:
-                result = self.real_func(**kwargs)
+        for param in self.pos_call:
+            myargs.append(kwargs[param])
+            kwargs.pop(param)
 
-        return result
+        return self.real_func(*myargs, **kwargs)
 
     def _type_cast(self, name, value):
         ''' cast param value to registered type '''
@@ -607,13 +595,7 @@ class _APIWrapper:
                 return f"/<{typ}{param}>" if param in self.pos_only \
                     else f"/{param}/<{typ}{param}>"
 
-        # skip "self"/"cls" first parameter
-        if self.func_type in (FuncType.CLASS_METHOD, FuncType.METHOD):
-            names = self.names[1:]
-        else:
-            names = self.names
-
-        return ''.join([get_one_url(x) for x in names if x not in self.param_autos])
+        return ''.join([get_one_url(x) for x in self.names if x not in self.param_autos])
 
     @property
     def has_optional_param(self):
