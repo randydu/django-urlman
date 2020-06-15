@@ -8,7 +8,6 @@ import traceback
 import functools
 import json
 import warnings
-import enum
 
 import django.conf
 import django.urls
@@ -28,17 +27,11 @@ _module_maps = {}  # module oaths
 _app_maps = {}  # app paths
 
 
-class TrailingSlash(enum.IntEnum):
-    """ setup policy of URI's trailing slash generation """
-    NO = 0  # appending trailing slash
-    YES = 1  # no trailing slash
-    # depending the mount( trailing_slash ) or default global settings
-    INHERIT = 2
-
-
 # global settings
 settings = {
-    'trailing_slash': True,
+    'trailing_slash': True,  # URI should has a trailing slash
+    'force_lowercase': True,  # URI should be in low-case
+    'underscore_to_hyphen': True,  # URI should use hyphen instead of underscore
 }
 
 
@@ -70,11 +63,11 @@ def app_path(pkg, path):
 
     _app_maps[name] = path
 
-# pylint: disable=(too-many-arguments, too-many-locals)
+# pylint: disable=(too-many-arguments, too-many-locals, too-many-branches)
 
 
 def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
-            module_maps=None, app_url=None, trailing_slash=True):
+            module_maps=None, app_url=None, trailing_slash=True, url_processor=None):
     """ deduce url from meta info """
     module_maps = module_maps or _module_maps
     segs = module.split('.')
@@ -111,6 +104,9 @@ def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
     else:
         # app-wide url is specified
         parts = app_url.strip(' /').split('/')
+
+    if url_processor:
+        parts = map(url_processor, parts)
 
     # full-path composition
     fpath = '/'.join(parts) if anchor == '' else (
@@ -222,13 +218,24 @@ def _check_multi_handlers(wrps):
                          )
 
 
-def _get_all_paths(prj: str, apps: dict, trailing_slash):
+def _process_url(orig_url, force_lowercase: bool, underscore_to_hyphen: bool):
+    ''' process URI according to specified policy '''
+    if force_lowercase:
+        orig_url = orig_url.lower()
+    if underscore_to_hyphen:
+        orig_url = orig_url.replace('_', '-')
+    return orig_url
+
+
+def _get_all_paths(prj: str, apps: dict,
+                   trailing_slash, force_lowercase, underscore_to_hyphen):
     """ get all all registered urls """
 
     grouped_wrps = {}  # wrappers grouped by site-url
     for wrp in _urls:
         # make sure the api can be called properly
-        wrp.cls = None if wrp.cls_resolver is None else wrp.cls_resolver()
+        if wrp.cls_resolver:
+            wrp.cls = wrp.cls_resolver()
         if wrp.func_type in (FuncType.METHOD, FuncType.CLASS_METHOD) \
                 and wrp.cls is None:
             raise ValueError(
@@ -241,13 +248,35 @@ def _get_all_paths(prj: str, apps: dict, trailing_slash):
             # site_url not specified, resolve it...
             mod_name = wrp.real_func.__module__
             mod = sys.modules[mod_name]
+
+            wrp_force_lowercase = force_lowercase \
+                if wrp.force_lowercase is None else wrp.force_lowercase
+
+            wrp_underscore_to_hyphen = underscore_to_hyphen \
+                if wrp.underscore_to_hyphen is None \
+                else wrp.underscore_to_hyphen
+
+            if wrp_force_lowercase or wrp_underscore_to_hyphen:
+                wrp_url_processor = \
+                    functools.partial(_process_url,
+                                      force_lowercase=wrp_force_lowercase,
+                                      underscore_to_hyphen=wrp_underscore_to_hyphen)
+            else:
+                wrp_url_processor = None
+
             wrp.site_url = _geturl(
-                prj, apps, mod.__package__, mod_name,
+                prj, apps,
+                mod.__package__,
+                mod_name,
                 '' if wrp.cls is None else wrp.cls.__name__,
-                wrp.func_name, wrp.param_url, app_url=wrp.url,
-                trailing_slash=trailing_slash if wrp.trailing_slash ==
-                TrailingSlash.INHERIT else wrp.trailing_slash ==
-                TrailingSlash.YES
+                wrp.func_name,
+                wrp.param_url(url_processor=wrp_url_processor),
+                app_url=wrp.url,
+
+                trailing_slash=trailing_slash if wrp.trailing_slash is None
+                else wrp.trailing_slash,
+
+                url_processor=wrp_url_processor
             )
 
         try:
@@ -280,13 +309,18 @@ def _get_all_paths(prj: str, apps: dict, trailing_slash):
     return paths
 
 
-def mount(apps: dict = None, *, urlconf=None, only_me=False, trailing_slash=None):
+def mount(apps: dict = None, *, urlconf=None, only_me=False,
+          trailing_slash=None, force_lowercase=None, underscore_to_hyphen=None):
     """ adds all registered api/url handlers """
 
     urlconf = urlconf or django.conf.settings.ROOT_URLCONF
 
     if trailing_slash is None:
         trailing_slash = settings['trailing_slash']
+    if force_lowercase is None:
+        force_lowercase = settings['force_lowercase']
+    if underscore_to_hyphen is None:
+        underscore_to_hyphen = settings['underscore_to_hyphen']
 
     mroot = importlib.import_module(urlconf)
     prj = mroot.__package__
@@ -321,9 +355,11 @@ def mount(apps: dict = None, *, urlconf=None, only_me=False, trailing_slash=None
     }
 
     if only_me:
-        mroot.urlpatterns = _get_all_paths(prj, apps, trailing_slash)
+        mroot.urlpatterns = _get_all_paths(prj, apps, trailing_slash,
+                                           force_lowercase, underscore_to_hyphen)
     else:
-        mroot.urlpatterns += _get_all_paths(prj, apps, trailing_slash)
+        mroot.urlpatterns += _get_all_paths(prj, apps, trailing_slash,
+                                            force_lowercase, underscore_to_hyphen)
 
 
 class _MyJSONEncoder(DjangoJSONEncoder):
@@ -375,11 +411,13 @@ class _APIWrapper:
 
         self.url = kwargs.get('url', None)  # app-wide url
         self.site_url = kwargs.get('site_url', None)  # site-wide url
-        #self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
+        # self.methods = {*[x.upper() for x in kwargs.get('methods', [])]}
         self.methods = {x.upper() for x in kwargs.get('methods', [])}
 
-        self.trailing_slash = kwargs.get(
-            'trailing_slash', TrailingSlash.INHERIT)
+        # URI generation policy, None: inherits upper-level settings.
+        self.trailing_slash = kwargs.get('trailing_slash', None)
+        self.force_lowercase = kwargs.get('force_lowercase', None)
+        self.underscore_to_hyphen = kwargs.get('underscore_to_hyphen', None)
 
         self._is_url = is_url
 
@@ -396,6 +434,8 @@ class _APIWrapper:
             self.func_type = FuncType.CLASS_METHOD
         elif is_staticmethod:
             self.func_type = FuncType.STATIC_METHOD
+
+        self.cls = None  # class-based api, will get resolved later by cls_resolver
 
         self._parse_signature(kwargs.get('param_types', {}))
 
@@ -447,9 +487,9 @@ class _APIWrapper:
         myargs = []
 
         if self.func_type == FuncType.CLASS_METHOD:
-            myargs.append(self.cls)  # cls,  pylint: disable=no-member
+            myargs.append(self.cls)
         elif self.func_type == FuncType.METHOD:
-            myargs.append(self.cls())  # self, pylint: disable=no-member
+            myargs.append(self.cls())  # self, pylint: disable=not-callable
 
         if self._is_url:
             myargs.append(req)
@@ -539,8 +579,10 @@ class _APIWrapper:
             return self.real_func(*args, **kwargs)
         if self.func_type == FuncType.CLASS_METHOD:
             return self.real_func(self.cls, *args, **kwargs)
-        if self.func_type == FuncType.METHOD:
-            return self.real_func(self.cls(), *args, **kwargs)
+
+        assert self.func_type == FuncType.METHOD
+        # pylint: disable=not-callable
+        return self.real_func(self.cls(), *args, **kwargs)
 
     def __call__(self, req, **kwargs):
         """ entry point of request handling called by diango.
@@ -593,12 +635,19 @@ class _APIWrapper:
                 'result': None,
             }, safe=False, encoder=_MyJSONEncoder)
 
-    @property
-    def param_url(self):
+    def param_url(self, *, url_processor=None):
         """ param-based url.
 
             '' if no param; it has the leading slash if needed, no trailing slash.
+
+            url_processor: function mapping str to str.
+
         """
+
+        def process_param(param):
+            # convert parameter name by url_processor
+            return url_processor(param) if url_processor else param
+
         if self.defaults:
             # has optional parameter, use re_path()
             def get_one_url(param):
@@ -612,16 +661,18 @@ class _APIWrapper:
                         # unregistered converter
                         pass
 
+                param_mapped = process_param(param)
+
                 if param in self.defaults:
                     # param is optional
                     if param in self.pos_only:
                         return f"(?:/(?P<{param}>{regex}))?"
-                    return f"(?:/{param}/(?P<{param}>{regex}))?"
+                    return f"(?:/{param_mapped}/(?P<{param}>{regex}))?"
 
                 # param is not optional
                 if param in self.pos_only:
                     return f"/(?P<{param}>{regex})"
-                return f"/{param}/(?P<{param}>{regex})"
+                return f"/{param_mapped}/(?P<{param}>{regex})"
 
         else:
             # no optional parameter, use path()
@@ -631,12 +682,14 @@ class _APIWrapper:
                 except KeyError:
                     typ = ''
 
+                param_mapped = process_param(param)
+
                 return f"/<{typ}{param}>" if param in self.pos_only \
-                    else f"/{param}/<{typ}{param}>"
+                    else f"/{param_mapped}/<{typ}{param}>"
 
         return ''.join([get_one_url(x) for x in self.names if x not in self.param_autos])
 
-    @property
+    @ property
     def has_optional_param(self):
         """ if the handler has any optional parameter?
 
@@ -666,25 +719,37 @@ def get_wrapper(func):
 class APIResult:
     '''utility to retrieve result of api from response'''
 
+    class NotAvailable(Exception):
+        ''' requested property value does not exist '''
+
     def __init__(self, response):
         self.status_code = response.status_code
-        self._r = json.loads(response.content)
+        if self.status_code != 404:
+            self._r = json.loads(response.content)
+        else:
+            self._r = None
 
-    @property
+    @ property
     def error(self):
         ''' error information '''
+        if self._r is None:
+            raise APIResult.NotAvailable()
         return self._r['error']
 
-    @property
+    @ property
     def stack(self):
         ''' exception stack if error != null '''
+        if self._r is None:
+            raise APIResult.NotAvailable()
         return self._r.get('stack', None)
 
-    @property
+    @ property
     def result(self):
         ''' api result on success, can be basic type (str, int, float,...) or dict, list.
             result == null on error
         '''
+        if self._r is None:
+            raise APIResult.NotAvailable()
         return self._r['result']
 
 # debug helpers

@@ -50,42 +50,42 @@ class Monitor:
 def test_api_param_url():
     @api
     def g(): pass
-    assert (g).param_url == ''
+    assert (g).param_url() == ''
 
     @api
     def f(a,b): pass
-    assert (f).param_url == '/a/<a>/b/<b>'
+    assert (f).param_url() == '/a/<a>/b/<b>'
 
     @api
     def typed(a:int,b:int): pass
-    assert (typed).param_url == '/a/<int:a>/b/<int:b>'
+    assert (typed).param_url() == '/a/<int:a>/b/<int:b>'
 
     @api
     def typed_mixed(a:int,b): pass
-    assert (typed_mixed).param_url == '/a/<int:a>/b/<b>'
+    assert (typed_mixed).param_url() == '/a/<int:a>/b/<b>'
 
     @api
     def optional(a:int,b=1): pass
-    assert (optional).param_url == '/a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+    assert (optional).param_url() == '/a/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
 
     @api
     def pos_only(a,/,b):pass
-    assert (pos_only).param_url == '/<a>/b/<b>'
+    assert (pos_only).param_url() == '/<a>/b/<b>'
 
     @api
     def pos_only_and_optional1(a:int,/,b=1):pass
-    assert (pos_only_and_optional1).param_url == '/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
+    assert (pos_only_and_optional1).param_url() == '/(?P<a>[0-9]+)(?:/b/(?P<b>[0-9]+))?'
 
     @api
     def pos_only_and_optional2(a:int,b=1,/):pass
-    assert (pos_only_and_optional2).param_url == '/(?P<a>[0-9]+)(?:/(?P<b>[0-9]+))?'
+    assert (pos_only_and_optional2).param_url() == '/(?P<a>[0-9]+)(?:/(?P<b>[0-9]+))?'
 
     @api
     def pos_only_and_optional3(a:int=0,/):pass
-    assert (pos_only_and_optional3).param_url == '(?:/(?P<a>[0-9]+))?'
+    assert (pos_only_and_optional3).param_url() == '(?:/(?P<a>[0-9]+))?'
 
 
-    assert Monitor().status.param_url == '' # pylint: disable=no-member
+    assert Monitor().status.param_url() == '' # pylint: disable=no-member
     
 
 def test_names():
@@ -111,7 +111,7 @@ def test_class_based_view():
             return 'hello ' + who
     
     h = api(SayHello())
-    assert (h).param_url == '/who/<who>'
+    assert (h).param_url() == '/who/<who>'
 
 #urlpatterns =[]
 
@@ -170,6 +170,10 @@ def name(name,/): # pylint: disable=function-redefined
     old_name, _name = _name, name
     return old_name
 
+# param url processing
+@api
+def get_info(block_no:int=100):
+    return block_no
 
 def test_site_url():
     module_path(__name__,'')
@@ -245,58 +249,58 @@ def test_site_url():
     assert r.result == 2
 
     # method
-    response = client.get('/get_only1/')
+    response = client.get('/get-only1/')
     r = APIResult(response)
     assert r.error == None
     
-    response = client.get('/get_only2/')
+    response = client.get('/get-only2/')
     r = APIResult(response)
     assert r.error == None
 
-    response = client.post('/get_only2/')
+    response = client.post('/get-only2/')
     assert response.status_code == 405 # not allowed
 
     # read
-    response = client.head('/read_only/')
+    response = client.head('/read-only/')
     assert response.status_code == 200 # allowed
-    response = client.get('/read_only/')
+    response = client.get('/read-only/')
     assert response.status_code == 200 # allowed
 
-    response = client.post('/read_only/')
+    response = client.post('/read-only/')
     assert response.status_code == 405 # not allowed
-    response = client.put('/read_only/')
+    response = client.put('/read-only/')
     assert response.status_code == 405 # not allowed
-    response = client.patch('/read_only/')
+    response = client.patch('/read-only/')
     assert response.status_code == 405 # not allowed
 
 
     # write
-    response = client.head('/write_only/')
+    response = client.head('/write-only/')
     assert response.status_code == 405 # not allowed
-    response = client.get('/write_only/')
+    response = client.get('/write-only/')
     assert response.status_code == 405 # not allowed
 
-    response = client.post('/write_only/')
+    response = client.post('/write-only/')
     assert response.status_code == 200 # allowed
-    response = client.put('/write_only/')
+    response = client.put('/write-only/')
     assert response.status_code == 200 # allowed
-    response = client.patch('/write_only/')
+    response = client.patch('/write-only/')
     assert response.status_code == 200 # allowed
 
     # django compatibility test
-    response = client.head('/get_only/')
+    response = client.head('/get-only/')
     assert response.status_code == 405 # not allowed
-    response = client.get('/get_only/')
+    response = client.get('/get-only/')
     assert response.status_code == 200 # allowed
 
-    response = client.post('/get_only/')
+    response = client.post('/get-only/')
     assert response.status_code == 405 # not allowed
-    response = client.put('/get_only/')
+    response = client.put('/get-only/')
     assert response.status_code == 405 # not allowed
-    response = client.patch('/get_only/')
+    response = client.patch('/get-only/')
     assert response.status_code == 405 # not allowed
 
-    assert get_wrapper(get_only).site_url == 'get_only/'
+    assert get_wrapper(get_only).site_url == 'get-only/'
 
     # test method-based dispatch
     response = client.get('/name/')
@@ -312,18 +316,24 @@ def test_site_url():
     assert response.json()['result'] == 'Janet'
 
     # test class-based api
-    assert Monitor().status.site_url == 'Monitor/status/'
-    assert Monitor.settings.site_url == 'Monitor/settings/'
-    assert Monitor.ping.site_url == 'Monitor/ping/'
+    assert Monitor().status.site_url == 'monitor/status/'
+    assert Monitor.settings.site_url == 'monitor/settings/'
+    assert Monitor.ping.site_url == 'monitor/ping/'
 
-    r = APIResult(client.get('/Monitor/status/'))
+    r = APIResult(client.get('/monitor/status/'))
     assert r.status_code == 200
     assert r.result == 10
 
-    r = APIResult(client.get('/Monitor/settings/'))
+    r = APIResult(client.get('/monitor/settings/'))
     assert r.status_code == 200
     assert r.result == Monitor.MAX_CONNECTIONS
 
-    r = APIResult(client.get('/Monitor/ping/'))
+    r = APIResult(client.get('/monitor/ping/'))
     assert r.status_code == 200
     assert r.result == 'OK'
+
+
+    # param url processing
+    r = APIResult(client.get('/get-info/block-no/1/'))
+    assert r.status_code == 200
+    assert r.result == 1
