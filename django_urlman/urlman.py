@@ -106,7 +106,7 @@ def _geturl(prj, app_paths, pkg, module, clsname, fname, param_url, *,
         parts = app_url.strip(' /').split('/')
 
     if url_processor:
-        parts = map(url_processor, parts)
+        parts = [url_processor(i) for i in parts]
 
     # full-path composition
     fpath = '/'.join(parts) if anchor == '' else (

@@ -2,7 +2,7 @@
 URL Manager for Django
 """
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __license__ = "MIT"
 __author__ = "Randy Du <randydu@gmail.com>"
 
